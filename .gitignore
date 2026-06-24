@@ -23,6 +23,7 @@ mobile_app/.flutter-plugins-dependencies
 
 # Backend runtime data
 backend/data/*.db
+backend/storage/
 
 # OS
 .DS_Store
