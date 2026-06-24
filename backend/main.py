@@ -5,6 +5,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 import config  # noqa: F401
+from services.llm_service import process_transcript
 from services.openrouter_service import transcribe_audio
 
 STORAGE_DIR = Path(__file__).parent / "storage"
@@ -40,9 +41,18 @@ async def upload_audio(file: UploadFile = File(...)):
             detail=f"Transcription failed: {exc}",
         ) from exc
 
+    try:
+        processed = await process_transcript(transcription)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"LLM processing failed: {exc}",
+        ) from exc
+
     return {
         "success": True,
         "filename": saved_name,
-        "size": len(content),
-        "transcription": transcription,
+        "raw_transcription": transcription,
+        "formatted_transcription": processed["formatted_transcript"],
+        "summary": processed["summary"],
     }
