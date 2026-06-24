@@ -10,10 +10,10 @@ Il progetto è pensato per un uso domestico: il server gira su una **Raspberry P
 
 | Obiettivo | Descrizione |
 |-----------|-------------|
-| **Registrazione continua** | L'app mobile registra audio in background (formato `.m4a`) e lo invia al backend. |
+| **Registrazione continua** | L'app mobile registra audio (formato `.m4a`) e lo invia al backend. |
 | **Trascrizione** | Il backend invia l'audio a **OpenRouter** (modello Whisper) per ottenere il testo integrale. |
 | **Riassunto AI** | Un LLM via OpenRouter produce riassunti e note strutturate dalle trascrizioni. |
-| **Self-hosting** | Tutti i metadati restano su un database SQLite locale; nessun vendor lock-in sullo storage. |
+| **Self-hosting** | I file audio restano in `backend/storage/`; metadati SQLite in `backend/data/`. |
 | **Privacy** | Il server è sotto il tuo controllo, raggiungibile solo tramite tunnel crittografato. |
 
 ---
@@ -28,9 +28,9 @@ Il progetto è pensato per un uso domestico: il server gira su una **Raspberry P
 │  • Registra     │                                     │
 │    audio .m4a   │                                     ▼
 │  • Upload       │                        ┌──────────────────────────┐
-│    background   │                        │  Backend (FastAPI)       │
-└─────────────────┘                        │  • Riceve audio          │
-                                           │  • SQLite (metadati)     │
+└─────────────────┘                        │  Backend (FastAPI)       │
+                                           │  • Riceve audio          │
+                                           │  • storage/ + data/      │
                                            │  • OpenRouter API        │
                                            └────────────┬─────────────┘
                                                         │
@@ -44,12 +44,11 @@ Il progetto è pensato per un uso domestico: il server gira su una **Raspberry P
 
 ### Flusso dati
 
-1. L'app Flutter avvia una registrazione audio in background e salva file `.m4a`.
-2. Al termine (o a intervalli), l'audio viene caricato sul backend via API REST.
-3. Il backend persiste i metadati (timestamp, durata, stato) in **SQLite**.
-4. Il backend invia l'audio a **OpenRouter** per la trascrizione Whisper.
-5. Il testo trascritto viene inviato a un LLM per generare riassunti e note.
-6. L'app può consultare trascrizioni e riassunti tramite le API del backend.
+1. L'app Flutter registra audio e salva file `.m4a`.
+2. Al termine, l'audio viene caricato sul backend via `POST /upload-audio`.
+3. Il backend salva il file in `storage/` e invia l'audio a **OpenRouter** (Whisper).
+4. Il testo trascritto viene elaborato da un LLM (formattazione interlocutori + riepilogo Markdown).
+5. L'app mostra trascrizione formattata e riepilogo nella lista in-app.
 
 ---
 
@@ -57,13 +56,13 @@ Il progetto è pensato per un uso domestico: il server gira su una **Raspberry P
 
 | Componente | Tecnologia | Note |
 |------------|------------|------|
-| **Mobile** | Flutter (Dart) | Registrazione audio background, upload HTTP |
-| **Backend** | Python 3.12+, FastAPI | API REST, gestione file e job asincroni |
-| **Database** | SQLite | Metadati registrazioni, trascrizioni, riassunti |
+| **Mobile** | Flutter (Dart) | Registrazione audio, upload HTTP |
+| **Backend** | Python 3.11+, FastAPI | API REST, gestione file |
+| **Database** | SQLite (`backend/data/`) | Predisposizione per metadati futuri |
 | **Container** | Docker + Docker Compose | Deploy riproducibile su PC e Raspberry Pi |
 | **AI** | OpenRouter | Whisper per STT, LLM per summarization |
 | **Rete** | Cloudflare Tunnel | Esposizione sicura senza port forwarding |
-| **Target hardware** | Raspberry Pi | Produzione; sviluppo iniziale su PC locale |
+| **Target hardware** | Raspberry Pi | Produzione; sviluppo su PC locale |
 
 ---
 
@@ -72,8 +71,9 @@ Il progetto è pensato per un uso domestico: il server gira su una **Raspberry P
 ```
 Drop/
 ├── README.md           # Questo file
-├── backend/            # API FastAPI, Docker, SQLite
-│   └── data/           # Database SQLite (gitignored)
+├── backend/            # API FastAPI, Docker, volumi persistenti
+│   ├── storage/        # File audio caricati (gitignored)
+│   └── data/           # Database SQLite (gitignored, tranne .gitkeep)
 └── mobile_app/         # Applicazione Flutter
 ```
 
@@ -85,13 +85,10 @@ Drop/
 
 - **Git**
 - **Docker** e **Docker Compose** (per il backend)
-- **Flutter SDK** (per l'app mobile, setup in corso)
+- **Flutter SDK** (per l'app mobile)
 - Account **OpenRouter** con API key
-- (Opzionale) **cloudflared** per testare il tunnel in locale
 
 ### Backend
-
-> Il backend sarà configurato nelle prossime iterazioni. Struttura prevista:
 
 ```bash
 cd backend
@@ -99,11 +96,9 @@ cp .env.example .env   # configurare OPENROUTER_API_KEY
 docker compose up --build
 ```
 
-L'API sarà disponibile su `http://localhost:8000`. La documentazione interattiva sarà su `/docs` (Swagger UI).
+L'API è disponibile su `http://localhost:8080`. Documentazione interattiva su `/docs`.
 
 ### Mobile App
-
-> Il progetto Flutter sarà inizializzato nelle prossime iterazioni.
 
 ```bash
 cd mobile_app
@@ -111,13 +106,159 @@ flutter pub get
 flutter run
 ```
 
-Configurare l'URL del backend nell'app (es. `http://<IP-PC>:8000` in sviluppo, URL del tunnel in produzione).
+In `mobile_app/lib/main.dart` l'host di sviluppo è configurato per:
 
-### Cloudflare Tunnel (produzione su Raspberry Pi)
+| Piattaforma | URL backend |
+|-------------|-------------|
+| Linux / desktop | `http://localhost:8080` |
+| Android emulator | `http://10.0.2.2:8080` |
+| Dispositivo fisico | `physicalDeviceBackendHost` (IP LAN del PC, es. `http://192.168.1.100:8080`) |
 
-1. Installare `cloudflared` sulla Raspberry Pi.
-2. Creare un tunnel nel dashboard Cloudflare e associarlo al servizio backend (`localhost:8000`).
-3. L'app mobile punterà all'URL pubblico del tunnel (es. `https://drop.example.com`).
+---
+
+## Deploy su Raspberry Pi
+
+Guida per esporre il backend in produzione tramite **Cloudflare Tunnel** su un dominio privato (es. `https://api.tuodominio.it`).
+
+### Prerequisiti sulla Raspberry
+
+- Raspberry Pi OS (64-bit consigliato) aggiornato
+- [Docker](https://docs.docker.com/engine/install/debian/) e Docker Compose plugin
+- Account Cloudflare con un dominio gestito
+- Chiave API **OpenRouter**
+
+### 1. Clonare il repository
+
+```bash
+cd ~
+git clone https://github.com/ZXerniXZ/Drop.git
+cd Drop/backend
+```
+
+### 2. Configurare `.env` di produzione
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Imposta almeno:
+
+```env
+OPENROUTER_API_KEY=sk-or-v1-...
+OPENROUTER_LLM_MODEL=google/gemini-2.5-flash
+```
+
+> Non committare mai `.env`. Il file è già nel `.gitignore`.
+
+I volumi Docker persistono i dati in percorsi relativi stabili rispetto alla cartella `backend/`:
+
+| Volume host | Percorso container | Contenuto |
+|-------------|-------------------|-----------|
+| `./storage` | `/app/storage` | File audio `.m4a` |
+| `./data` | `/app/data` | Database SQLite |
+
+### 3. Cloudflare Tunnel
+
+Hai due opzioni equivalenti.
+
+#### Opzione A — `cloudflared` nel Docker Compose (consigliata)
+
+1. Accedi a [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) → **Networks** → **Tunnels** → **Create a tunnel**.
+2. Scegli **Cloudflared** come connettore e assegna un nome (es. `drop-raspberry`).
+3. Nella configurazione del **Public Hostname**:
+   - **Subdomain**: `api` (o il sottodominio desiderato)
+   - **Domain**: `tuodominio.it`
+   - **Service type**: HTTP
+   - **URL**: `http://backend:8080` (nome del servizio Docker nella stessa rete Compose)
+4. Copia il **Tunnel Token** generato da Cloudflare.
+5. Aggiungilo al `.env` sulla Raspberry:
+
+   ```env
+   CLOUDFLARE_TUNNEL_TOKEN=eyJhIjoi...
+   ```
+
+6. Avvia backend + tunnel:
+
+   ```bash
+   docker compose --profile tunnel up -d --build
+   ```
+
+#### Opzione B — `cloudflared` installato sulla Raspberry (host)
+
+```bash
+# Installazione (Debian / Raspberry Pi OS)
+curl -L https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared jammy main' | sudo tee /etc/apt/sources.list.d/cloudflared.list
+sudo apt update && sudo apt install cloudflared
+```
+
+1. Crea il tunnel dal [dashboard Cloudflare](https://one.dash.cloudflare.com/) come sopra.
+2. Per il **Public Hostname**, imposta l'URL del servizio su `http://localhost:8080` (backend in ascolto sulla porta host).
+3. Installa il tunnel come servizio di sistema:
+
+   ```bash
+   sudo cloudflared service install <TUNNEL_TOKEN>
+   sudo systemctl enable --now cloudflared
+   ```
+
+4. Avvia solo il backend:
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+### 4. Verifica
+
+```bash
+# Stato container
+docker compose ps
+
+# Log backend
+docker compose logs -f backend
+
+# Test endpoint pubblico (sostituisci col tuo dominio)
+curl -I https://api.tuodominio.it/docs
+```
+
+### 5. Configurare l'app mobile per la produzione
+
+In `mobile_app/lib/main.dart`:
+
+1. Commenta il blocco **Sviluppo locale**.
+2. Decommenta il blocco **Produzione** e aggiorna il dominio:
+
+   ```dart
+   const bool useProductionBackend = true;
+   const String productionBackendUrl = 'https://api.tuodominio.it/upload-audio';
+   ```
+
+3. Compila e installa l'app:
+
+   ```bash
+   cd mobile_app
+   flutter build apk   # Android
+   # oppure flutter build ios
+   ```
+
+### Comandi utili in produzione
+
+```bash
+cd ~/Drop/backend
+
+# Avvio in background (solo backend)
+docker compose up -d
+
+# Avvio con tunnel Cloudflare
+docker compose --profile tunnel up -d
+
+# Aggiornamento dopo git pull
+git pull
+docker compose up -d --build
+
+# Arresto
+docker compose down
+```
 
 ---
 
@@ -131,13 +272,13 @@ Configurare l'URL del backend nell'app (es. `http://<IP-PC>:8000` in sviluppo, U
 
 ## Roadmap
 
-- [ ] Setup backend FastAPI + Docker
-- [ ] Schema SQLite e API upload audio
-- [ ] Integrazione OpenRouter (Whisper + LLM)
-- [ ] Setup progetto Flutter con registrazione background
-- [ ] Upload audio dall'app al backend
-- [ ] Cloudflare Tunnel su Raspberry Pi
-- [ ] UI per consultare trascrizioni e riassunti
+- [x] Setup backend FastAPI + Docker
+- [x] Integrazione OpenRouter (Whisper + LLM)
+- [x] Setup progetto Flutter con registrazione audio
+- [x] Upload audio dall'app al backend
+- [x] UI per consultare trascrizioni e riassunti
+- [ ] Cloudflare Tunnel su Raspberry Pi (documentato, deploy da completare)
+- [ ] Schema SQLite e persistenza metadati trascrizioni
 
 ---
 

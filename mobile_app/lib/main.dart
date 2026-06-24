@@ -7,7 +7,17 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
-/// IP del PC in rete locale — modifica con l'indirizzo del tuo backend.
+// ── Produzione (Cloudflare Tunnel) ──────────────────────────────────────────
+// Decommenta le due righe sotto, commenta il blocco Sviluppo, e aggiorna il dominio.
+//
+// const bool useProductionBackend = true;
+// const String productionBackendUrl = 'https://api.tuodominio.it/upload-audio';
+
+// ── Sviluppo locale ─────────────────────────────────────────────────────────
+const bool useProductionBackend = false;
+const String productionBackendUrl = 'https://api.tuodominio.it/upload-audio';
+
+/// IP del PC in rete locale — modifica con l'indirizzo del tuo backend (sviluppo).
 const String physicalDeviceBackendHost = 'http://192.168.1.100:8080';
 
 void main() {
@@ -120,6 +130,9 @@ class _RecorderScreenState extends State<RecorderScreen> {
   }
 
   Future<String> _resolveUploadUrl() async {
+    if (useProductionBackend) {
+      return productionBackendUrl;
+    }
     if (Platform.isAndroid) {
       if (await _isAndroidEmulator()) {
         return 'http://10.0.2.2:8080/upload-audio';
