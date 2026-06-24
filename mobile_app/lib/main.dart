@@ -1,8 +1,13 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+
+/// IP del PC in rete locale — modifica con l'indirizzo del tuo backend.
+const String physicalDeviceBackendHost = 'http://192.168.1.100:8080';
 
 void main() {
   runApp(const DropApp());
@@ -40,6 +45,7 @@ class RecorderScreen extends StatefulWidget {
 class _RecorderScreenState extends State<RecorderScreen> {
   final AudioRecorder _recorder = AudioRecorder();
   bool _isRecording = false;
+  bool _isUploading = false;
   Duration _elapsed = Duration.zero;
   Timer? _timer;
   String? _currentPath;
@@ -57,7 +63,81 @@ class _RecorderScreenState extends State<RecorderScreen> {
     return '$minutes:$seconds';
   }
 
+  Future<bool> _isAndroidEmulator() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      final cpuinfo = await File('/proc/cpuinfo').readAsString();
+      return cpuinfo.contains('goldfish') ||
+          cpuinfo.contains('ranchu') ||
+          cpuinfo.contains('qemu');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<String> _resolveUploadUrl() async {
+    if (Platform.isAndroid) {
+      if (await _isAndroidEmulator()) {
+        return 'http://10.0.2.2:8080/upload-audio';
+      }
+      return '$physicalDeviceBackendHost/upload-audio';
+    }
+    if (Platform.isIOS) {
+      return '$physicalDeviceBackendHost/upload-audio';
+    }
+    return 'http://localhost:8080/upload-audio';
+  }
+
+  Future<void> _uploadAudio(String filePath) async {
+    setState(() => _isUploading = true);
+
+    try {
+      final url = await _resolveUploadUrl();
+      final request = http.MultipartRequest('POST', Uri.parse(url));
+      request.files.add(
+        await http.MultipartFile.fromPath('file', filePath),
+      );
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Audio caricato con successo sul backend'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Upload fallito (${response.statusCode}): ${response.body}',
+            ),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Errore upload: $e'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isUploading = false);
+    }
+  }
+
   Future<void> _toggleRecording() async {
+    if (_isUploading) return;
+
     if (_isRecording) {
       await _stopRecording();
     } else {
@@ -109,83 +189,109 @@ class _RecorderScreenState extends State<RecorderScreen> {
       _elapsed = Duration.zero;
     });
 
-    if (!mounted) return;
     final savedPath = path ?? _currentPath;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Registrazione salvata in: $savedPath'),
-        duration: const Duration(seconds: 5),
-      ),
-    );
     _currentPath = null;
+
+    if (savedPath == null || !mounted) return;
+    await _uploadAudio(savedPath);
   }
 
   @override
   Widget build(BuildContext context) {
+    final isBusy = _isRecording || _isUploading;
+
     return Scaffold(
       body: SafeArea(
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                'Drop',
-                style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
+        child: Stack(
+          children: [
+            Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'Drop',
+                    style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _isUploading
+                        ? 'Caricamento in corso...'
+                        : _isRecording
+                            ? 'Registrazione in corso'
+                            : 'Tocca per registrare',
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: Colors.grey,
+                        ),
+                  ),
+                  if (_isRecording) ...[
+                    const SizedBox(height: 24),
+                    Text(
+                      _formatDuration(_elapsed),
+                      style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                            color: Colors.redAccent,
+                            fontWeight: FontWeight.w600,
+                          ),
                     ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _isRecording ? 'Registrazione in corso' : 'Tocca per registrare',
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: Colors.grey,
-                    ),
-              ),
-              if (_isRecording) ...[
-                const SizedBox(height: 24),
-                Text(
-                  _formatDuration(_elapsed),
-                  style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                        color: Colors.redAccent,
-                        fontWeight: FontWeight.w600,
+                  ],
+                  const SizedBox(height: 48),
+                  GestureDetector(
+                    onTap: isBusy && !_isRecording ? null : _toggleRecording,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      width: 120,
+                      height: 120,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _isRecording
+                            ? Colors.red.withValues(alpha: 0.2)
+                            : Colors.grey.withValues(alpha: 0.15),
+                        border: Border.all(
+                          color: _isRecording
+                              ? Colors.red
+                              : Colors.grey.shade600,
+                          width: 3,
+                        ),
+                        boxShadow: _isRecording
+                            ? [
+                                BoxShadow(
+                                  color: Colors.red.withValues(alpha: 0.4),
+                                  blurRadius: 20,
+                                  spreadRadius: 2,
+                                ),
+                              ]
+                            : null,
                       ),
-                ),
-              ],
-              const SizedBox(height: 48),
-              GestureDetector(
-                onTap: _toggleRecording,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  width: 120,
-                  height: 120,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _isRecording
-                        ? Colors.red.withValues(alpha: 0.2)
-                        : Colors.grey.withValues(alpha: 0.15),
-                    border: Border.all(
-                      color: _isRecording ? Colors.red : Colors.grey.shade600,
-                      width: 3,
+                      child: Icon(
+                        _isRecording ? Icons.stop_rounded : Icons.mic,
+                        size: 48,
+                        color: _isUploading
+                            ? Colors.grey.shade700
+                            : _isRecording
+                                ? Colors.red
+                                : Colors.grey.shade400,
+                      ),
                     ),
-                    boxShadow: _isRecording
-                        ? [
-                            BoxShadow(
-                              color: Colors.red.withValues(alpha: 0.4),
-                              blurRadius: 20,
-                              spreadRadius: 2,
-                            ),
-                          ]
-                        : null,
                   ),
-                  child: Icon(
-                    _isRecording ? Icons.stop_rounded : Icons.mic,
-                    size: 48,
-                    color: _isRecording ? Colors.red : Colors.grey.shade400,
+                ],
+              ),
+            ),
+            if (_isUploading)
+              Container(
+                color: Colors.black54,
+                child: const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 16),
+                      Text('Invio audio al backend...'),
+                    ],
                   ),
                 ),
               ),
-            ],
-          ),
+          ],
         ),
       ),
     );

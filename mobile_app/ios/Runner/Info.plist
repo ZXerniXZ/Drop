@@ -28,6 +28,11 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Drop ha bisogno del microfono per registrare le note audio.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
