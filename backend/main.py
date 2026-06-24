@@ -1,8 +1,11 @@
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+
+import config  # noqa: F401
+from services.openrouter_service import transcribe_audio
 
 STORAGE_DIR = Path(__file__).parent / "storage"
 
@@ -29,8 +32,17 @@ async def upload_audio(file: UploadFile = File(...)):
     content = await file.read()
     destination.write_bytes(content)
 
+    try:
+        transcription = await transcribe_audio(str(destination))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Transcription failed: {exc}",
+        ) from exc
+
     return {
         "success": True,
         "filename": saved_name,
         "size": len(content),
+        "transcription": transcription,
     }
