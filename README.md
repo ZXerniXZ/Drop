@@ -147,7 +147,10 @@ Imposta almeno:
 ```env
 OPENROUTER_API_KEY=sk-or-v1-...
 OPENROUTER_LLM_MODEL=google/gemini-2.5-flash
+BACKEND_PORT=8080
 ```
+
+> Se la porta `8080` è già in uso sulla Raspberry (es. da un altro container), imposta `BACKEND_PORT=8082` e punta Cloudflare Tunnel a `http://localhost:8082`.
 
 > Non committare mai `.env`. Il file è già nel `.gitignore`.
 
@@ -160,7 +163,30 @@ I volumi Docker persistono i dati in percorsi relativi stabili rispetto alla car
 
 ### 3. Cloudflare Tunnel
 
-Hai due opzioni equivalenti.
+Il backend in ascolto sulla Raspberry risponde su **`http://localhost:8080`** (o `http://backend:8080` se `cloudflared` gira nello stesso Docker Compose). Cloudflare Tunnel crea un collegamento crittografato verso l'esterno senza aprire porte sul router.
+
+```
+Internet  ──HTTPS──►  api.tuodominio.it  ──tunnel──►  cloudflared  ──HTTP──►  localhost:8080
+                                                                              (FastAPI Drop)
+```
+
+| Dove gira `cloudflared` | URL servizio da impostare in Zero Trust |
+|-------------------------|----------------------------------------|
+| Sul host Raspberry (Opzione B) | `http://localhost:8080` |
+| Nel Docker Compose (Opzione A) | `http://backend:8080` |
+
+**Passi nel dashboard Cloudflare Zero Trust** ([one.dash.cloudflare.com](https://one.dash.cloudflare.com/)):
+
+1. **Networks** → **Tunnels** → **Create a tunnel** → nome `drop-raspberry`.
+2. Scegli connettore **Cloudflared** e copia il **Tunnel Token**.
+3. **Public Hostname** → **Add a public hostname**:
+   - **Subdomain**: `api`
+   - **Domain**: `tuodominio.it` (il tuo dominio su Cloudflare)
+   - **Type**: HTTP
+   - **URL**: `http://localhost:8080` *(host)* oppure `http://backend:8080` *(Docker)*
+4. Salva: le richieste a `https://api.tuodominio.it` verranno inoltrate al backend Drop sulla Raspberry.
+
+Hai due opzioni equivalenti per eseguire `cloudflared`.
 
 #### Opzione A — `cloudflared` nel Docker Compose (consigliata)
 
