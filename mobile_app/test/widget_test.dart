@@ -9,6 +9,7 @@ void main() {
 
     expect(find.text('Drop'), findsOneWidget);
     expect(find.text('Tocca per registrare'), findsOneWidget);
+    expect(find.text('Trascrizioni'), findsOneWidget);
     expect(find.byIcon(Icons.mic), findsOneWidget);
   });
 }

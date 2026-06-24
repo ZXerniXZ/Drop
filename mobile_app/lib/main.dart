@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -35,6 +36,18 @@ class DropApp extends StatelessWidget {
   }
 }
 
+class TranscriptionEntry {
+  const TranscriptionEntry({
+    required this.createdAt,
+    required this.filename,
+    required this.text,
+  });
+
+  final DateTime createdAt;
+  final String filename;
+  final String text;
+}
+
 class RecorderScreen extends StatefulWidget {
   const RecorderScreen({super.key});
 
@@ -44,6 +57,8 @@ class RecorderScreen extends StatefulWidget {
 
 class _RecorderScreenState extends State<RecorderScreen> {
   final AudioRecorder _recorder = AudioRecorder();
+  final List<TranscriptionEntry> _transcriptions = [];
+
   bool _isRecording = false;
   bool _isUploading = false;
   Duration _elapsed = Duration.zero;
@@ -61,6 +76,14 @@ class _RecorderScreenState extends State<RecorderScreen> {
     final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
     return '$minutes:$seconds';
+  }
+
+  String _formatTimestamp(DateTime dateTime) {
+    final day = dateTime.day.toString().padLeft(2, '0');
+    final month = dateTime.month.toString().padLeft(2, '0');
+    final hour = dateTime.hour.toString().padLeft(2, '0');
+    final minute = dateTime.minute.toString().padLeft(2, '0');
+    return '$day/$month $hour:$minute';
   }
 
   Future<bool> _isAndroidEmulator() async {
@@ -104,9 +127,24 @@ class _RecorderScreenState extends State<RecorderScreen> {
       if (!mounted) return;
 
       if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final transcription = data['transcription'] as String? ?? '';
+        final filename = data['filename'] as String? ?? 'audio.m4a';
+
+        setState(() {
+          _transcriptions.insert(
+            0,
+            TranscriptionEntry(
+              createdAt: DateTime.now(),
+              filename: filename,
+              text: transcription,
+            ),
+          );
+        });
+
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Audio caricato con successo sul backend'),
+            content: Text('Trascrizione completata'),
             backgroundColor: Colors.green,
           ),
         );
@@ -204,78 +242,179 @@ class _RecorderScreenState extends State<RecorderScreen> {
       body: SafeArea(
         child: Stack(
           children: [
-            Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    'Drop',
-                    style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _isUploading
-                        ? 'Caricamento in corso...'
-                        : _isRecording
-                            ? 'Registrazione in corso'
-                            : 'Tocca per registrare',
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: Colors.grey,
-                        ),
-                  ),
-                  if (_isRecording) ...[
-                    const SizedBox(height: 24),
-                    Text(
-                      _formatDuration(_elapsed),
-                      style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                            color: Colors.redAccent,
-                            fontWeight: FontWeight.w600,
-                          ),
-                    ),
-                  ],
-                  const SizedBox(height: 48),
-                  GestureDetector(
-                    onTap: isBusy && !_isRecording ? null : _toggleRecording,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      width: 120,
-                      height: 120,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: _isRecording
-                            ? Colors.red.withValues(alpha: 0.2)
-                            : Colors.grey.withValues(alpha: 0.15),
-                        border: Border.all(
-                          color: _isRecording
-                              ? Colors.red
-                              : Colors.grey.shade600,
-                          width: 3,
-                        ),
-                        boxShadow: _isRecording
-                            ? [
-                                BoxShadow(
-                                  color: Colors.red.withValues(alpha: 0.4),
-                                  blurRadius: 20,
-                                  spreadRadius: 2,
+            Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+                  child: Column(
+                    children: [
+                      Text(
+                        'Drop',
+                        style:
+                            Theme.of(context).textTheme.headlineLarge?.copyWith(
+                                  fontWeight: FontWeight.bold,
                                 ),
-                              ]
-                            : null,
                       ),
-                      child: Icon(
-                        _isRecording ? Icons.stop_rounded : Icons.mic,
-                        size: 48,
-                        color: _isUploading
-                            ? Colors.grey.shade700
+                      const SizedBox(height: 8),
+                      Text(
+                        _isUploading
+                            ? 'Trascrizione in corso...'
                             : _isRecording
-                                ? Colors.red
-                                : Colors.grey.shade400,
+                                ? 'Registrazione in corso'
+                                : 'Tocca per registrare',
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                              color: Colors.grey,
+                            ),
                       ),
-                    ),
+                      if (_isRecording) ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          _formatDuration(_elapsed),
+                          style:
+                              Theme.of(context).textTheme.displaySmall?.copyWith(
+                                    color: Colors.redAccent,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                        ),
+                      ],
+                      const SizedBox(height: 24),
+                      GestureDetector(
+                        onTap:
+                            isBusy && !_isRecording ? null : _toggleRecording,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          width: 100,
+                          height: 100,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _isRecording
+                                ? Colors.red.withValues(alpha: 0.2)
+                                : Colors.grey.withValues(alpha: 0.15),
+                            border: Border.all(
+                              color: _isRecording
+                                  ? Colors.red
+                                  : Colors.grey.shade600,
+                              width: 3,
+                            ),
+                            boxShadow: _isRecording
+                                ? [
+                                    BoxShadow(
+                                      color:
+                                          Colors.red.withValues(alpha: 0.4),
+                                      blurRadius: 20,
+                                      spreadRadius: 2,
+                                    ),
+                                  ]
+                                : null,
+                          ),
+                          child: Icon(
+                            _isRecording ? Icons.stop_rounded : Icons.mic,
+                            size: 40,
+                            color: _isUploading
+                                ? Colors.grey.shade700
+                                : _isRecording
+                                    ? Colors.red
+                                    : Colors.grey.shade400,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+                const Divider(height: 1),
+                Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.article_outlined, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Trascrizioni',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        '${_transcriptions.length}',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Colors.grey,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: _transcriptions.isEmpty
+                      ? Center(
+                          child: Text(
+                            'Nessuna trascrizione.\nRegistra un audio per iniziare.',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(color: Colors.grey),
+                          ),
+                        )
+                      : ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                          itemCount: _transcriptions.length,
+                          separatorBuilder: (_, _) => const SizedBox(height: 10),
+                          itemBuilder: (context, index) {
+                            final entry = _transcriptions[index];
+                            return Card(
+                              color: const Color(0xFF1E1E1E),
+                              child: Padding(
+                                padding: const EdgeInsets.all(14),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Text(
+                                          _formatTimestamp(entry.createdAt),
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .labelMedium
+                                              ?.copyWith(color: Colors.grey),
+                                        ),
+                                        const Spacer(),
+                                        Icon(
+                                          Icons.audiotrack,
+                                          size: 14,
+                                          color: Colors.grey.shade600,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Flexible(
+                                          child: Text(
+                                            entry.filename,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .labelSmall
+                                                ?.copyWith(color: Colors.grey),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      entry.text.isEmpty
+                                          ? '(Trascrizione vuota)'
+                                          : entry.text,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
             ),
             if (_isUploading)
               Container(
@@ -286,7 +425,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
                     children: [
                       CircularProgressIndicator(),
                       SizedBox(height: 16),
-                      Text('Invio audio al backend...'),
+                      Text('Invio audio e trascrizione...'),
                     ],
                   ),
                 ),
