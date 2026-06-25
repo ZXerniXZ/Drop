@@ -108,6 +108,17 @@ class LocalDatabaseService {
     return rows.map(AudioNote.fromMap).toList();
   }
 
+  Future<bool> noteExists(String id) async {
+    final rows = await _database.query(
+      'audio_notes',
+      columns: ['id'],
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
   Future<void> markNoteOpened(String id) async {
     await _database.update(
       'audio_notes',

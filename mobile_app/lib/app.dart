@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'screens/login_screen.dart';
 import 'screens/recorder_screen.dart';
+import 'services/supabase_auth_service.dart';
 import 'theme/drop_theme.dart';
 
 class DropApp extends StatefulWidget {
@@ -28,9 +31,18 @@ class _DropAppState extends State<DropApp> {
       themeMode: _themeMode,
       theme: DropTheme.light(),
       darkTheme: DropTheme.dark(),
-      home: RecorderScreen(
-        isDarkMode: _themeMode == ThemeMode.dark,
-        onToggleTheme: _toggleTheme,
+      home: StreamBuilder<AuthState>(
+        stream: SupabaseAuthService.instance.authStateChanges,
+        builder: (context, snapshot) {
+          final session = SupabaseAuthService.instance.currentSession;
+          if (session == null) {
+            return const LoginScreen();
+          }
+          return RecorderScreen(
+            isDarkMode: _themeMode == ThemeMode.dark,
+            onToggleTheme: _toggleTheme,
+          );
+        },
       ),
     );
   }

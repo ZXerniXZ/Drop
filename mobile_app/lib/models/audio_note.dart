@@ -111,6 +111,43 @@ class AudioNote {
     );
   }
 
+  factory AudioNote.fromServerNote(Map<String, dynamic> data) {
+    final id = data['note_id'] as String? ?? data['id'] as String?;
+    if (id == null || id.isEmpty) {
+      throw const FormatException('Server note missing id');
+    }
+
+    var tag = NoteTagsConfig.defaultTags.first;
+    final keyData = data['key_data'];
+    if (keyData is Map<String, dynamic>) {
+      final tagLabel = keyData['tags'] as String?;
+      if (tagLabel != null && tagLabel.isNotEmpty) {
+        tag = NoteTagsConfig.normalizeTag(tagLabel);
+      }
+    }
+
+    final createdAtRaw = data['created_at'] as String?;
+    final dateTime = createdAtRaw != null && createdAtRaw.isNotEmpty
+        ? DateTime.parse(createdAtRaw).toLocal()
+        : DateTime.now();
+
+    return AudioNote(
+      id: id,
+      title: (data['title'] as String?)?.trim().isNotEmpty == true
+          ? (data['title'] as String).trim()
+          : titleFromDateTime(dateTime),
+      dateTime: dateTime,
+      audioPath: '',
+      transcription: data['formatted_transcription'] as String? ?? '',
+      summary: data['summary'] as String? ?? '',
+      rawTranscription: data['raw_transcription'] as String? ?? '',
+      isNew: true,
+      tag: tag,
+      analysisStatus: NoteAnalysisStatus.ready,
+      structuredData: NoteStructuredData.fromResponse(data),
+    );
+  }
+
   factory AudioNote.fromMap(Map<String, Object?> map) {
     return AudioNote(
       id: map['id'] as String,

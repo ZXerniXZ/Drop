@@ -42,6 +42,7 @@ class NoteContext(BaseModel):
 
 class NoteChatRequest(BaseModel):
     message: str
+    note_id: str
     history: list[ChatHistoryMessage] = Field(default_factory=list)
     ai_model: str | None = None
     note_context: NoteContext

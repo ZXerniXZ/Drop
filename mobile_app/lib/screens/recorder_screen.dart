@@ -15,9 +15,11 @@ import '../models/note_tags_config.dart';
 import '../services/app_preferences_service.dart';
 import '../models/note_filters.dart';
 import '../services/audio_recording_config.dart';
+import '../services/cloud_sync_service.dart';
 import '../services/local_database_service.dart';
 import '../services/openrouter_client.dart';
 import '../services/recording_foreground_service.dart';
+import '../services/supabase_auth_service.dart';
 import '../theme/drop_theme.dart';
 import '../utils/note_filter_utils.dart';
 import '../widgets/note_filter_bar.dart';
@@ -103,6 +105,16 @@ class _RecorderScreenState extends State<RecorderScreen> {
       _notes = notes;
       _isLoadingNotes = false;
     });
+    unawaited(_syncNotesFromCloud());
+  }
+
+  Future<void> _syncNotesFromCloud() async {
+    final inserted = await CloudSyncService.instance.syncNotesFromServer();
+    if (inserted == 0 || !mounted) return;
+
+    final notes = await LocalDatabaseService.instance.getAllNotes();
+    if (!mounted) return;
+    setState(() => _notes = notes);
   }
 
   void _updateNoteInList(AudioNote note) {
@@ -178,6 +190,14 @@ class _RecorderScreenState extends State<RecorderScreen> {
     }
   }
 
+  Future<String> _requireAccessToken() async {
+    final token = SupabaseAuthService.instance.currentAccessToken;
+    if (token == null || token.isEmpty) {
+      throw Exception('Sessione scaduta. Effettua di nuovo l\'accesso.');
+    }
+    return token;
+  }
+
   Future<String> _resolveUploadUrl() async {
     return ApiUrlResolver.resolveEndpoint('/upload-audio');
   }
@@ -194,7 +214,15 @@ class _RecorderScreenState extends State<RecorderScreen> {
       if (!mounted) return null;
 
       final url = await _resolveJobUrl(jobId);
-      final response = await http.get(Uri.parse(url));
+      final accessToken = await _requireAccessToken();
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {'Authorization': 'Bearer $accessToken'},
+      );
+
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        throw Exception('Sessione scaduta. Effettua di nuovo l\'accesso.');
+      }
 
       if (response.statusCode == 404) {
         await Future<void>.delayed(pollInterval);
@@ -250,7 +278,9 @@ class _RecorderScreenState extends State<RecorderScreen> {
         );
       } else {
         final url = await _resolveUploadUrl();
+        final accessToken = await _requireAccessToken();
         final request = http.MultipartRequest('POST', Uri.parse(url));
+        request.headers['Authorization'] = 'Bearer $accessToken';
         request.files.add(await http.MultipartFile.fromPath('file', filePath));
         request.fields['ai_model'] = prefs.model.openRouterId;
         request.fields['language'] = prefs.transcriptionLanguage.name;
@@ -277,6 +307,9 @@ class _RecorderScreenState extends State<RecorderScreen> {
             final errJson = jsonDecode(response.body) as Map<String, dynamic>;
             errorDetail = errJson['detail']?.toString() ?? errorDetail;
           } catch (_) {}
+          if (response.statusCode == 401 || response.statusCode == 403) {
+            errorDetail = 'Accesso richiesto. Effettua di nuovo l\'accesso.';
+          }
           final failed = placeholder.copyWith(
             analysisStatus: NoteAnalysisStatus.failed,
             transcription: 'Upload fallito (${response.statusCode}): $errorDetail',
