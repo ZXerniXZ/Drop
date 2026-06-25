@@ -90,6 +90,10 @@ class LocalDatabaseService {
     );
   }
 
+  Future<void> clearAllAudioPaths() async {
+    await _database.update('audio_notes', {'audio_path': ''});
+  }
+
   Future<void> deleteNote(String id) async {
     await _database.delete(
       'audio_notes',

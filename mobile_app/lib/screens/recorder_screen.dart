@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
+import '../config/api_config.dart';
 import '../models/audio_note.dart';
 import '../models/note_filters.dart';
 import '../services/audio_recording_config.dart';
@@ -20,8 +21,8 @@ import '../widgets/note_filter_bar.dart';
 import '../widgets/drop_bottom_nav.dart';
 import '../widgets/note_list_card.dart';
 import 'note_detail_screen.dart';
+import 'my_data_screen.dart';
 
-const String productionBackendUrl = 'https://api.drop-prj.xyz/upload-audio';
 const String physicalDeviceBackendHost = 'http://192.168.1.100:8080';
 
 class RecorderScreen extends StatefulWidget {
@@ -166,7 +167,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
   }
 
   Future<String> _resolveUploadUrl() async {
-    if (kReleaseMode) return productionBackendUrl;
+    if (kReleaseMode) return productionUploadUrl;
     if (Platform.isAndroid) {
       if (await _isAndroidEmulator()) {
         return 'http://10.0.2.2:8080/upload-audio';
@@ -504,7 +505,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
 
   Widget _buildBody(BuildContext context) {
     if (_activeTab == DropNavTab.settings) {
-      return _buildSettingsPlaceholder(context);
+      return const MyDataScreen();
     }
 
     if (_isLoadingNotes) {
@@ -565,32 +566,6 @@ class _RecorderScreenState extends State<RecorderScreen> {
             const SizedBox(height: 8),
             Text(
               subtitle,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSettingsPlaceholder(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(32, 0, 32, 16),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.construction_outlined,
-              size: 40,
-              color: DropColors.muted(context),
-            ),
-            const SizedBox(height: 16),
-            Text('In arrivo', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Text(
-              'Wallet, impostazioni AI, backup e stato server saranno disponibili in una prossima versione.',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium,
             ),
