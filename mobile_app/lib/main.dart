@@ -8,13 +8,19 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
+import 'models/audio_note.dart';
+import 'screens/note_detail_screen.dart';
+import 'services/local_database_service.dart';
+
 /// URL produzione (Cloudflare Tunnel) — usato automaticamente nelle build release (APK CI).
 const String productionBackendUrl = 'https://api.drop-prj.xyz/upload-audio';
 
 /// IP del PC in rete locale — solo per sviluppo in debug (`flutter run`).
 const String physicalDeviceBackendHost = 'http://192.168.1.100:8080';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await LocalDatabaseService.instance.init();
   runApp(const DropApp());
 }
 
@@ -40,22 +46,6 @@ class DropApp extends StatelessWidget {
   }
 }
 
-class TranscriptionEntry {
-  const TranscriptionEntry({
-    required this.createdAt,
-    required this.filename,
-    required this.formattedText,
-    required this.rawText,
-    required this.summary,
-  });
-
-  final DateTime createdAt;
-  final String filename;
-  final String formattedText;
-  final String rawText;
-  final String summary;
-}
-
 class RecorderScreen extends StatefulWidget {
   const RecorderScreen({super.key});
 
@@ -65,19 +55,36 @@ class RecorderScreen extends StatefulWidget {
 
 class _RecorderScreenState extends State<RecorderScreen> {
   final AudioRecorder _recorder = AudioRecorder();
-  final List<TranscriptionEntry> _transcriptions = [];
+  final LocalDatabaseService _db = LocalDatabaseService.instance;
 
+  List<AudioNote> _notes = [];
   bool _isRecording = false;
   bool _isUploading = false;
+  bool _isLoadingNotes = true;
   Duration _elapsed = Duration.zero;
   Timer? _timer;
   String? _currentPath;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadNotes();
+  }
 
   @override
   void dispose() {
     _timer?.cancel();
     _recorder.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadNotes() async {
+    final notes = await _db.getAllNotes();
+    if (!mounted) return;
+    setState(() {
+      _notes = notes;
+      _isLoadingNotes = false;
+    });
   }
 
   String _formatDuration(Duration duration) {
@@ -94,21 +101,42 @@ class _RecorderScreenState extends State<RecorderScreen> {
     return '$day/$month $hour:$minute';
   }
 
-  TranscriptionEntry _entryFromResponse(Map<String, dynamic> data) {
+  AudioNote _noteFromResponse(
+    Map<String, dynamic> data, {
+    required String id,
+    required String audioPath,
+    required DateTime createdAt,
+  }) {
     final raw = data['raw_transcription'] as String? ??
         data['transcription'] as String? ??
         '';
     final formatted = data['formatted_transcription'] as String? ?? raw;
     final summary = data['summary'] as String? ?? '';
-    final filename = data['filename'] as String? ?? 'audio.m4a';
 
-    return TranscriptionEntry(
-      createdAt: DateTime.now(),
-      filename: filename,
-      formattedText: formatted,
-      rawText: raw,
+    return AudioNote(
+      id: id,
+      title: AudioNote.titleFromDateTime(createdAt),
+      dateTime: createdAt,
+      audioPath: audioPath,
+      transcription: formatted,
       summary: summary,
+      rawTranscription: raw,
     );
+  }
+
+  Future<String?> _persistAudioFile(String tempPath, String noteId) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final recordingsDir = Directory('${dir.path}/recordings');
+      if (!await recordingsDir.exists()) {
+        await recordingsDir.create(recursive: true);
+      }
+      final dest = '${recordingsDir.path}/$noteId.m4a';
+      await File(tempPath).copy(dest);
+      return dest;
+    } catch (_) {
+      return tempPath;
+    }
   }
 
   Future<bool> _isAndroidEmulator() async {
@@ -156,14 +184,27 @@ class _RecorderScreenState extends State<RecorderScreen> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final createdAt = DateTime.now();
+        final noteId = createdAt.millisecondsSinceEpoch.toString();
+        final persistedPath =
+            await _persistAudioFile(filePath, noteId) ?? filePath;
+        final note = _noteFromResponse(
+          data,
+          id: noteId,
+          audioPath: persistedPath,
+          createdAt: createdAt,
+        );
 
+        await _db.saveNote(note);
+
+        if (!mounted) return;
         setState(() {
-          _transcriptions.insert(0, _entryFromResponse(data));
+          _notes.insert(0, note);
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Trascrizione completata'),
+            content: Text('Trascrizione salvata'),
             backgroundColor: Colors.green,
           ),
         );
@@ -190,6 +231,18 @@ class _RecorderScreenState extends State<RecorderScreen> {
     } finally {
       if (mounted) setState(() => _isUploading = false);
     }
+  }
+
+  Future<void> _deleteNote(AudioNote note) async {
+    await _db.deleteNote(note.id);
+    if (note.audioPath.isNotEmpty) {
+      try {
+        final file = File(note.audioPath);
+        if (await file.exists()) await file.delete();
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() => _notes.removeWhere((n) => n.id == note.id));
   }
 
   Future<void> _toggleRecording() async {
@@ -251,6 +304,14 @@ class _RecorderScreenState extends State<RecorderScreen> {
 
     if (savedPath == null || !mounted) return;
     await _uploadAudio(savedPath);
+  }
+
+  void _openNoteDetail(AudioNote note) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => NoteDetailScreen(note: note),
+      ),
+    );
   }
 
   @override
@@ -356,7 +417,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
                       ),
                       const Spacer(),
                       Text(
-                        '${_transcriptions.length}',
+                        '${_notes.length}',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: Colors.grey,
                             ),
@@ -365,28 +426,35 @@ class _RecorderScreenState extends State<RecorderScreen> {
                   ),
                 ),
                 Expanded(
-                  child: _transcriptions.isEmpty
-                      ? Center(
-                          child: Text(
-                            'Nessuna trascrizione.\nRegistra un audio per iniziare.',
-                            textAlign: TextAlign.center,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(color: Colors.grey),
-                          ),
-                        )
-                      : ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                          itemCount: _transcriptions.length,
-                          separatorBuilder: (_, _) => const SizedBox(height: 10),
-                          itemBuilder: (context, index) {
-                            return _TranscriptionCard(
-                              entry: _transcriptions[index],
-                              formatTimestamp: _formatTimestamp,
-                            );
-                          },
-                        ),
+                  child: _isLoadingNotes
+                      ? const Center(child: CircularProgressIndicator())
+                      : _notes.isEmpty
+                          ? Center(
+                              child: Text(
+                                'Nessuna trascrizione.\nRegistra un audio per iniziare.',
+                                textAlign: TextAlign.center,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(color: Colors.grey),
+                              ),
+                            )
+                          : ListView.separated(
+                              padding:
+                                  const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                              itemCount: _notes.length,
+                              separatorBuilder: (_, _) =>
+                                  const SizedBox(height: 10),
+                              itemBuilder: (context, index) {
+                                return _NoteCard(
+                                  note: _notes[index],
+                                  formatTimestamp: _formatTimestamp,
+                                  onTap: () =>
+                                      _openNoteDetail(_notes[index]),
+                                  onDelete: () => _deleteNote(_notes[index]),
+                                );
+                              },
+                            ),
                 ),
               ],
             ),
@@ -411,105 +479,69 @@ class _RecorderScreenState extends State<RecorderScreen> {
   }
 }
 
-class _TranscriptionCard extends StatelessWidget {
-  const _TranscriptionCard({
-    required this.entry,
+class _NoteCard extends StatelessWidget {
+  const _NoteCard({
+    required this.note,
     required this.formatTimestamp,
+    required this.onTap,
+    required this.onDelete,
   });
 
-  final TranscriptionEntry entry;
+  final AudioNote note;
   final String Function(DateTime) formatTimestamp;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
-    final displayText = entry.formattedText.isNotEmpty
-        ? entry.formattedText
-        : entry.rawText;
+    final displayText = note.transcription.isNotEmpty
+        ? note.transcription
+        : note.rawTranscription;
 
     return Card(
       color: const Color(0xFF1E1E1E),
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          tilePadding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
-          childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-          title: Row(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      note.title,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 20),
+                    color: Colors.grey.shade600,
+                    onPressed: onDelete,
+                    tooltip: 'Elimina',
+                  ),
+                ],
+              ),
               Text(
-                formatTimestamp(entry.createdAt),
+                formatTimestamp(note.dateTime),
                 style: Theme.of(context)
                     .textTheme
                     .labelMedium
                     ?.copyWith(color: Colors.grey),
               ),
-              const Spacer(),
-              Icon(
-                Icons.audiotrack,
-                size: 14,
-                color: Colors.grey.shade600,
-              ),
-              const SizedBox(width: 4),
-              Flexible(
-                child: Text(
-                  entry.filename,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context)
-                      .textTheme
-                      .labelSmall
-                      ?.copyWith(color: Colors.grey),
-                ),
+              const SizedBox(height: 8),
+              Text(
+                displayText.isEmpty ? '(Trascrizione vuota)' : displayText,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium,
               ),
             ],
           ),
-          subtitle: Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text(
-              displayText.isEmpty ? '(Trascrizione vuota)' : displayText,
-              maxLines: 4,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          ),
-          children: [
-            if (entry.summary.isNotEmpty) ...[
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Riepilogo',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: Colors.redAccent,
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                entry.summary,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ],
-            if (entry.rawText.isNotEmpty &&
-                entry.rawText != entry.formattedText) ...[
-              const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Trascrizione grezza',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: Colors.grey,
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                entry.rawText,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.grey.shade400,
-                    ),
-              ),
-            ],
-          ],
         ),
       ),
     );
