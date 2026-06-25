@@ -167,15 +167,12 @@ journalctl -u actions.runner.* -f   # log in tempo reale
 
 ### 3. Prerequisiti sulla Raspberry (una tantum)
 
-Il workflow esegue `docker compose` nella cartella `backend/` della workspace del runner. I file **non** versionati devono essere collegati dalla produzione:
+Il workflow aggiorna e avvia il backend da **`~/Drop`** (clone git permanente), non dalla workspace temporanea del runner.
 
 ```bash
-# Dopo la prima esecuzione del workflow (o preventivamente)
-WORKSPACE=~/actions-runner/_work/Drop/Drop/backend
-mkdir -p "$WORKSPACE"
-ln -sf ~/Drop/backend/.env "$WORKSPACE/.env"
-ln -sf ~/Drop/backend/storage "$WORKSPACE/storage"
-ln -sf ~/Drop/backend/data "$WORKSPACE/data"
+# Clone iniziale (se non esiste già)
+git clone https://github.com/ZXerniXZ/Drop.git ~/Drop
+cp backend/.env.example ~/Drop/backend/.env   # poi compila le chiavi
 ```
 
 Assicurati che:
@@ -189,13 +186,13 @@ Assicurati che:
 |--------|-------------------|
 | Push / merge su `main` | GitHub Actions avvia il job |
 | Runner `self-hosted` | Esegue il job sulla Raspberry |
-| `actions/checkout@v4` | Scarica l'ultimo codice |
-| `docker compose up -d --build` | Ricostruisce e riavvia il backend |
+| `git fetch` + `git reset --hard origin/main` | Aggiorna `~/Drop` all'ultimo `main` |
+| `docker compose up -d --build` in `~/Drop/backend` | Ricostruisce e riavvia il backend |
 
 Verifica manuale dopo un deploy:
 
 ```bash
-cd ~/actions-runner/_work/Drop/Drop/backend
+cd ~/Drop/backend
 docker compose ps
 docker compose logs --tail=30 backend
 curl -I http://localhost:8083/docs

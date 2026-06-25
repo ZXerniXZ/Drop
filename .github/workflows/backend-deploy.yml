@@ -9,13 +9,37 @@ jobs:
   deploy:
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Link production secrets and persistent volumes
+      - name: Pull latest code and restart containers
         run: |
-          ln -sf ~/Drop/backend/.env backend/.env
-          ln -sf ~/Drop/backend/storage backend/storage
-          ln -sf ~/Drop/backend/data backend/data
+          set -euo pipefail
 
-      - name: Rebuild and restart Docker containers
-        run: cd backend && docker compose down && docker compose up -d --build
+          PROD_DIR="$HOME/Drop"
+          BACKEND_DIR="$PROD_DIR/backend"
+
+          if [[ ! -d "$PROD_DIR/.git" ]]; then
+            echo "Cloning repository into $PROD_DIR"
+            git clone https://github.com/ZXerniXZ/Drop.git "$PROD_DIR"
+          fi
+
+          cd "$PROD_DIR"
+          git fetch origin main
+          git reset --hard origin/main
+
+          if [[ ! -f "$BACKEND_DIR/.env" ]]; then
+            echo "ERROR: Missing $BACKEND_DIR/.env — create it on the Raspberry Pi first."
+            exit 1
+          fi
+
+          mkdir -p "$BACKEND_DIR/storage" "$BACKEND_DIR/data"
+
+          BACKEND_PORT=$(grep -E '^BACKEND_PORT=' "$BACKEND_DIR/.env" | cut -d= -f2- | tr -d '[:space:]' || true)
+          BACKEND_PORT="${BACKEND_PORT:-8083}"
+
+          cd "$BACKEND_DIR"
+          docker compose down
+          docker compose up -d --build
+
+          docker compose ps
+          curl -sf --max-time 10 "http://localhost:${BACKEND_PORT}/docs" >/dev/null
+
+          echo "Deploy completed successfully"
