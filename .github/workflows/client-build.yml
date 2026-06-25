@@ -8,11 +8,24 @@ on:
       - 'mobile_app/**'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Read app version
+        id: version
+        working-directory: mobile_app
+        run: |
+          v=$(grep '^version:' pubspec.yaml | awk '{print $2}')
+          echo "full=$v" >> "$GITHUB_OUTPUT"
+          echo "name=${v%+*}" >> "$GITHUB_OUTPUT"
+          echo "build=${v#*+}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${v%+*}-build${v#*+}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-java@v4
         with:
@@ -29,7 +42,24 @@ jobs:
           flutter pub get
           flutter build apk --release
 
+      - name: Prepare release APK
+        run: cp mobile_app/build/app/outputs/flutter-apk/app-release.apk drop-release.apk
+
       - uses: actions/upload-artifact@v4
         with:
           name: drop-app-release
-          path: mobile_app/build/app/outputs/flutter-apk/app-release.apk
+          path: drop-release.apk
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Drop ${{ steps.version.outputs.name }} (build ${{ steps.version.outputs.build }})
+          body: |
+            APK di produzione per Android.
+
+            **Installazione:** scarica `drop-release.apk`, abilita installazione da origini sconosciute e installa.
+
+            Backend: `https://api.drop-prj.xyz`
+          files: drop-release.apk
+          make_latest: true
