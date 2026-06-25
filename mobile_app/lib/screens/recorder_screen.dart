@@ -417,6 +417,44 @@ class _RecorderScreenState extends State<RecorderScreen> {
     ));
   }
 
+  Future<void> _retryAnalysis(AudioNote note) async {
+    if (note.isProcessing) return;
+
+    final path = note.audioPath;
+    if (path.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('File audio non disponibile')),
+      );
+      return;
+    }
+
+    if (!await File(path).exists()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('File audio non trovato sul dispositivo')),
+      );
+      return;
+    }
+
+    final retrying = note.copyWith(
+      analysisStatus: NoteAnalysisStatus.processing,
+      transcription: '',
+      summary: '',
+      rawTranscription: '',
+      structuredData: const NoteStructuredData(),
+    );
+    await LocalDatabaseService.instance.saveNote(retrying);
+    if (!mounted) return;
+    _updateNoteInList(retrying);
+
+    unawaited(_processUpload(
+      noteId: note.id,
+      filePath: path,
+      durationSeconds: note.durationSeconds,
+    ));
+  }
+
   Future<void> _openNoteDetail(AudioNote note) async {
     if (note.isProcessing) return;
 
@@ -434,6 +472,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
         builder: (_) => NoteDetailScreen(
           note: note,
           onDelete: () => _deleteNote(note),
+          onRetry: note.isFailed ? () => _retryAnalysis(note) : null,
         ),
       ),
     );
@@ -566,6 +605,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
           dateLabel: _formatNoteDate(note.dateTime),
           onTap: note.isProcessing ? null : () => _openNoteDetail(note),
           onDelete: () => _deleteNote(note),
+          onRetry: note.isFailed ? () => _retryAnalysis(note) : null,
         );
       },
     );

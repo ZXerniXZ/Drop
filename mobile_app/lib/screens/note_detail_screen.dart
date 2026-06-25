@@ -19,10 +19,12 @@ class NoteDetailScreen extends StatefulWidget {
     super.key,
     required this.note,
     required this.onDelete,
+    this.onRetry,
   });
 
   final AudioNote note;
   final VoidCallback onDelete;
+  final VoidCallback? onRetry;
 
   @override
   State<NoteDetailScreen> createState() => _NoteDetailScreenState();
@@ -102,6 +104,7 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
         child: Column(
           children: [
             _buildTopBar(context),
+            if (widget.note.isFailed) _buildFailedBanner(context),
             if (_mode == _DetailMode.notes) _buildSubTabBar(context),
             Expanded(
               child: _mode == _DetailMode.sources
@@ -115,13 +118,69 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
               controller: _askAiController,
               onSend: _onAskAiSend,
               onOpenChat: () => _openChatSheet(),
-              enabled: !widget.note.isProcessing,
+              enabled: !widget.note.isProcessing && !widget.note.isFailed,
               hintText: widget.note.isProcessing
                   ? 'ANALISI IN CORSO...'
-                  : 'ASK DROP ABOUT THIS NOTE...',
+                  : widget.note.isFailed
+                      ? 'ANALISI FALLITA'
+                      : 'ASK DROP ABOUT THIS NOTE...',
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildFailedBanner(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: DropColors.recordRed.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: DropColors.recordRed.withValues(alpha: 0.25),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Analisi fallita',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: DropColors.recordRed,
+                  letterSpacing: 1,
+                ),
+          ),
+          if (widget.note.transcription.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              widget.note.transcription,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: DropColors.recordRed.withValues(alpha: 0.9),
+                    fontSize: 12,
+                  ),
+            ),
+          ],
+          if (widget.onRetry != null) ...[
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () {
+                  widget.onRetry!();
+                  Navigator.of(context).pop();
+                },
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Riprova analisi'),
+                style: TextButton.styleFrom(
+                  foregroundColor: DropColors.recordRed,
+                ),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

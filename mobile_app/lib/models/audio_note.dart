@@ -50,6 +50,8 @@ class AudioNote {
 
   bool get isProcessing => analysisStatus.isProcessing;
 
+  bool get isFailed => analysisStatus == NoteAnalysisStatus.failed;
+
   String get searchableText =>
       '$title $tag $transcription $summary $rawTranscription'.toLowerCase();
 

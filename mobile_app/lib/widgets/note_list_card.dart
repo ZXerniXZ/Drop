@@ -10,22 +10,29 @@ class NoteListCard extends StatelessWidget {
     required this.dateLabel,
     required this.onTap,
     required this.onDelete,
+    this.onRetry,
   });
 
   final AudioNote note;
   final String dateLabel;
   final VoidCallback? onTap;
   final VoidCallback onDelete;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isProcessing = note.isProcessing;
+    final isFailed = note.isFailed;
     final preview = isProcessing
         ? 'Analisi in corso...'
-        : note.transcription.isNotEmpty
-            ? note.transcription
-            : note.rawTranscription;
+        : isFailed
+            ? (note.transcription.isNotEmpty
+                ? note.transcription
+                : 'Analisi fallita')
+            : note.transcription.isNotEmpty
+                ? note.transcription
+                : note.rawTranscription;
 
     return Material(
       color: isDark ? DropColors.darkSurface : DropColors.lightSurface,
@@ -42,7 +49,9 @@ class NoteListCard extends StatelessWidget {
               border: Border.all(
                 color: isProcessing
                     ? DropColors.recordRed.withValues(alpha: 0.25)
-                    : DropColors.border(context),
+                    : isFailed
+                        ? DropColors.recordRed.withValues(alpha: 0.4)
+                        : DropColors.border(context),
               ),
               boxShadow: [
                 BoxShadow(
@@ -118,12 +127,31 @@ class NoteListCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           fontSize: 13,
-                          color: isProcessing
-                              ? DropColors.muted(context)
+                          color: isFailed
+                              ? DropColors.recordRed.withValues(alpha: 0.85)
                               : DropColors.muted(context),
-                          fontStyle:
-                              isProcessing ? FontStyle.italic : FontStyle.normal,
+                          fontStyle: isProcessing || isFailed
+                              ? FontStyle.italic
+                              : FontStyle.normal,
                         ),
+                  ),
+                ],
+                if (isFailed && onRetry != null) ...[
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: onRetry,
+                      icon: const Icon(Icons.refresh, size: 16),
+                      label: const Text('Riprova analisi'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: DropColors.recordRed,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
+                        ),
+                      ),
+                    ),
                   ),
                 ],
                 const SizedBox(height: 12),
