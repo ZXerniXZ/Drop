@@ -11,5 +11,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Link production secrets and persistent volumes
+        run: |
+          ln -sf ~/Drop/backend/.env backend/.env
+          ln -sf ~/Drop/backend/storage backend/storage
+          ln -sf ~/Drop/backend/data backend/data
+
       - name: Rebuild and restart Docker containers
         run: cd backend && docker compose down && docker compose up -d --build
