@@ -37,9 +37,22 @@ jobs:
 
           cd "$BACKEND_DIR"
           docker compose down
-          docker compose up -d --build
+          docker compose up -d --build --wait --wait-timeout 120
 
           docker compose ps
-          curl -sf --max-time 10 "http://localhost:${BACKEND_PORT}/docs" >/dev/null
+
+          echo "Waiting for /docs to respond..."
+          for attempt in $(seq 1 30); do
+            if curl -sf --max-time 5 "http://localhost:${BACKEND_PORT}/docs" >/dev/null; then
+              echo "Backend is ready (attempt ${attempt})"
+              break
+            fi
+            if [[ "${attempt}" -eq 30 ]]; then
+              echo "ERROR: Backend did not become ready in time"
+              docker compose logs --tail=50 backend
+              exit 1
+            fi
+            sleep 2
+          done
 
           echo "Deploy completed successfully"
