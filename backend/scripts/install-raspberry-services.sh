@@ -14,7 +14,7 @@ fi
 install -m 644 "$BACKEND_DIR/systemd/drop-backend.service" "$SYSTEMD_DIR/drop-backend.service"
 install -m 644 "$BACKEND_DIR/systemd/drop-healthcheck.service" "$SYSTEMD_DIR/drop-healthcheck.service"
 install -m 644 "$BACKEND_DIR/systemd/drop-healthcheck.timer" "$SYSTEMD_DIR/drop-healthcheck.timer"
-install -m 755 "$BACKEND_DIR/scripts/healthcheck.sh" "$BACKEND_DIR/scripts/healthcheck.sh"
+chmod 755 "$BACKEND_DIR/scripts/healthcheck.sh"
 
 # cloudflared: riavvio automatico se il processo termina
 mkdir -p /etc/systemd/system/cloudflared.service.d
