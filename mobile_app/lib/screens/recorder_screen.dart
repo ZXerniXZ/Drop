@@ -10,19 +10,18 @@ import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
 import '../models/audio_note.dart';
+import '../models/note_filters.dart';
 import '../services/audio_recording_config.dart';
 import '../services/local_database_service.dart';
 import '../services/recording_foreground_service.dart';
 import '../theme/drop_theme.dart';
+import '../utils/note_filter_utils.dart';
+import '../widgets/note_filter_bar.dart';
 import '../widgets/drop_bottom_nav.dart';
 import '../widgets/note_list_card.dart';
-import '../widgets/recording_banner.dart';
 import 'note_detail_screen.dart';
 
-/// URL produzione (Cloudflare Tunnel) — usato automaticamente nelle build release (APK CI).
 const String productionBackendUrl = 'https://api.drop-prj.xyz/upload-audio';
-
-/// IP del PC in rete locale — solo per sviluppo in debug (`flutter run`).
 const String physicalDeviceBackendHost = 'http://192.168.1.100:8080';
 
 class RecorderScreen extends StatefulWidget {
@@ -41,15 +40,21 @@ class RecorderScreen extends StatefulWidget {
 
 class _RecorderScreenState extends State<RecorderScreen> {
   final AudioRecorder _recorder = AudioRecorder();
+  final TextEditingController _searchController = TextEditingController();
 
   List<AudioNote> _notes = [];
+  NoteFilters _filters = const NoteFilters();
   DropNavTab _activeTab = DropNavTab.file;
   bool _isRecording = false;
-  bool _isUploading = false;
   bool _isLoadingNotes = true;
+  bool _searchExpanded = false;
   Duration _elapsed = Duration.zero;
+  double _amplitudeLevel = 0;
   Timer? _timer;
+  StreamSubscription<Amplitude>? _amplitudeSub;
   String? _currentPath;
+
+  List<AudioNote> get _filteredNotes => applyNoteFilters(_notes, _filters);
 
   @override
   void initState() {
@@ -62,6 +67,8 @@ class _RecorderScreenState extends State<RecorderScreen> {
   void dispose() {
     FlutterForegroundTask.removeTaskDataCallback(_onForegroundTaskData);
     _timer?.cancel();
+    _amplitudeSub?.cancel();
+    _searchController.dispose();
     _recorder.dispose();
     super.dispose();
   }
@@ -72,6 +79,12 @@ class _RecorderScreenState extends State<RecorderScreen> {
     }
   }
 
+  double _normalizeAmplitude(double db) {
+    if (db <= -60) return 0;
+    if (db >= 0) return 1;
+    return (db + 60) / 60;
+  }
+
   Future<void> _loadNotes() async {
     final notes = await LocalDatabaseService.instance.getAllNotes();
     if (!mounted) return;
@@ -79,6 +92,12 @@ class _RecorderScreenState extends State<RecorderScreen> {
       _notes = notes;
       _isLoadingNotes = false;
     });
+  }
+
+  void _updateNoteInList(AudioNote note) {
+    final index = _notes.indexWhere((n) => n.id == note.id);
+    if (index == -1) return;
+    setState(() => _notes[index] = note);
   }
 
   String _formatDuration(Duration duration) {
@@ -98,10 +117,8 @@ class _RecorderScreenState extends State<RecorderScreen> {
 
   AudioNote _noteFromResponse(
     Map<String, dynamic> data, {
-    required String id,
+    required AudioNote placeholder,
     required String audioPath,
-    required DateTime createdAt,
-    required int durationSeconds,
   }) {
     final raw = data['raw_transcription'] as String? ??
         data['transcription'] as String? ??
@@ -109,15 +126,12 @@ class _RecorderScreenState extends State<RecorderScreen> {
     final formatted = data['formatted_transcription'] as String? ?? raw;
     final summary = data['summary'] as String? ?? '';
 
-    return AudioNote(
-      id: id,
-      title: AudioNote.titleFromDateTime(createdAt),
-      dateTime: createdAt,
+    return placeholder.copyWith(
       audioPath: audioPath,
       transcription: formatted,
       summary: summary,
       rawTranscription: raw,
-      durationSeconds: durationSeconds,
+      analysisStatus: NoteAnalysisStatus.ready,
     );
   }
 
@@ -152,9 +166,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
   }
 
   Future<String> _resolveUploadUrl() async {
-    if (kReleaseMode) {
-      return productionBackendUrl;
-    }
+    if (kReleaseMode) return productionBackendUrl;
     if (Platform.isAndroid) {
       if (await _isAndroidEmulator()) {
         return 'http://10.0.2.2:8080/upload-audio';
@@ -167,71 +179,65 @@ class _RecorderScreenState extends State<RecorderScreen> {
     return 'http://localhost:8080/upload-audio';
   }
 
-  Future<void> _uploadAudio(String filePath, {required int durationSeconds}) async {
-    setState(() => _isUploading = true);
-
+  Future<void> _processUpload({
+    required String noteId,
+    required String filePath,
+    required int durationSeconds,
+  }) async {
     try {
       final url = await _resolveUploadUrl();
       final request = http.MultipartRequest('POST', Uri.parse(url));
-      request.files.add(
-        await http.MultipartFile.fromPath('file', filePath),
-      );
+      request.files.add(await http.MultipartFile.fromPath('file', filePath));
 
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
 
       if (!mounted) return;
 
+      final index = _notes.indexWhere((n) => n.id == noteId);
+      if (index == -1) return;
+      final placeholder = _notes[index];
+
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final createdAt = DateTime.now();
-        final noteId = createdAt.millisecondsSinceEpoch.toString();
         final persistedPath =
             await _persistAudioFile(filePath, noteId) ?? filePath;
         final note = _noteFromResponse(
           data,
-          id: noteId,
+          placeholder: placeholder,
           audioPath: persistedPath,
-          createdAt: createdAt,
-          durationSeconds: durationSeconds,
         );
 
         await LocalDatabaseService.instance.saveNote(note);
-
         if (!mounted) return;
-        setState(() {
-          _notes.insert(0, note);
-          _activeTab = DropNavTab.file;
-        });
+        _updateNoteInList(note);
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Trascrizione salvata'),
+            content: Text('Trascrizione completata'),
             backgroundColor: Colors.green,
           ),
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Upload fallito (${response.statusCode}): ${response.body}',
-            ),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 5),
-          ),
+        final failed = placeholder.copyWith(
+          analysisStatus: NoteAnalysisStatus.failed,
+          transcription: 'Upload fallito (${response.statusCode})',
         );
+        await LocalDatabaseService.instance.saveNote(failed);
+        if (!mounted) return;
+        _updateNoteInList(failed);
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Errore upload: $e'),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 5),
-        ),
+      final index = _notes.indexWhere((n) => n.id == noteId);
+      if (index == -1) return;
+      final failed = _notes[index].copyWith(
+        analysisStatus: NoteAnalysisStatus.failed,
+        transcription: 'Errore: $e',
       );
-    } finally {
-      if (mounted) setState(() => _isUploading = false);
+      await LocalDatabaseService.instance.saveNote(failed);
+      if (!mounted) return;
+      _updateNoteInList(failed);
     }
   }
 
@@ -248,8 +254,6 @@ class _RecorderScreenState extends State<RecorderScreen> {
   }
 
   Future<void> _toggleRecording() async {
-    if (_isUploading) return;
-
     if (_isRecording) {
       await _stopRecording();
     } else {
@@ -270,33 +274,29 @@ class _RecorderScreenState extends State<RecorderScreen> {
     final dir = await getTemporaryDirectory();
     final path = AudioRecordingConfig.buildTempPath(dir.path);
 
-    await _recorder.start(
-      AudioRecordingConfig.recordConfig,
-      path: path,
+    await _recorder.start(AudioRecordingConfig.recordConfig, path: path);
+
+    await RecordingForegroundService.start(
+      elapsedLabel: _formatDuration(Duration.zero),
     );
 
-    final elapsedLabel = _formatDuration(Duration.zero);
-    final serviceStarted = await RecordingForegroundService.start(
-      elapsedLabel: elapsedLabel,
-    );
-    if (!serviceStarted && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Impossibile avviare il servizio in primo piano. '
-            'La registrazione potrebbe interrompersi in background.',
-          ),
-        ),
-      );
-    }
+    _amplitudeSub?.cancel();
+    _amplitudeSub = _recorder
+        .onAmplitudeChanged(const Duration(milliseconds: 80))
+        .listen((amp) {
+      if (!mounted) return;
+      setState(() => _amplitudeLevel = _normalizeAmplitude(amp.current));
+    });
 
     setState(() {
       _isRecording = true;
       _elapsed = Duration.zero;
+      _amplitudeLevel = 0;
       _currentPath = path;
     });
 
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
       setState(() => _elapsed += const Duration(seconds: 1));
       RecordingForegroundService.updateElapsed(_formatDuration(_elapsed));
     });
@@ -305,28 +305,66 @@ class _RecorderScreenState extends State<RecorderScreen> {
   Future<void> _stopRecording() async {
     _timer?.cancel();
     _timer = null;
+    await _amplitudeSub?.cancel();
+    _amplitudeSub = null;
+
     final recordedDuration = _elapsed;
     final path = await _recorder.stop();
-
     await RecordingForegroundService.stop();
 
     setState(() {
       _isRecording = false;
       _elapsed = Duration.zero;
+      _amplitudeLevel = 0;
     });
 
     final savedPath = path ?? _currentPath;
     _currentPath = null;
-
     if (savedPath == null || !mounted) return;
-    await _uploadAudio(
-      savedPath,
+
+    final createdAt = DateTime.now();
+    final noteId = createdAt.millisecondsSinceEpoch.toString();
+    final placeholder = AudioNote(
+      id: noteId,
+      title: AudioNote.titleFromDateTime(createdAt),
+      dateTime: createdAt,
+      audioPath: savedPath,
+      transcription: '',
+      summary: '',
       durationSeconds: recordedDuration.inSeconds,
+      isNew: true,
+      tag: NoteTag.diario,
+      analysisStatus: NoteAnalysisStatus.processing,
     );
+
+    await LocalDatabaseService.instance.saveNote(placeholder);
+    if (!mounted) return;
+
+    setState(() {
+      _notes.insert(0, placeholder);
+      _activeTab = DropNavTab.file;
+    });
+
+    unawaited(_processUpload(
+      noteId: noteId,
+      filePath: savedPath,
+      durationSeconds: recordedDuration.inSeconds,
+    ));
   }
 
-  void _openNoteDetail(AudioNote note) {
-    Navigator.of(context).push(
+  Future<void> _openNoteDetail(AudioNote note) async {
+    if (note.isProcessing) return;
+
+    if (note.isNew) {
+      final opened = note.copyWith(isNew: false);
+      await LocalDatabaseService.instance.markNoteOpened(note.id);
+      await LocalDatabaseService.instance.saveNote(opened);
+      _updateNoteInList(opened);
+      note = opened;
+    }
+
+    if (!mounted) return;
+    await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => NoteDetailScreen(
           note: note,
@@ -340,33 +378,19 @@ class _RecorderScreenState extends State<RecorderScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: Stack(
+        child: Column(
           children: [
-            Column(
-              children: [
-                _buildHeader(context),
-                _buildSubHeader(context),
-                if (_isRecording)
-                  RecordingBanner(
-                    elapsedLabel: _formatDuration(_elapsed),
-                    onStop: _stopRecording,
-                  ),
-                Expanded(child: _buildBody(context)),
-              ],
+            _buildHeader(context),
+            _buildSubHeader(context),
+            if (_activeTab == DropNavTab.file) _buildFiltersSection(context),
+            Expanded(child: _buildBody(context)),
+            DropBottomNav(
+              activeTab: _activeTab,
+              onTabChanged: (tab) => setState(() => _activeTab = tab),
+              onRecordTap: _toggleRecording,
+              isRecording: _isRecording,
+              amplitudeLevel: _amplitudeLevel,
             ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: DropBottomNav(
-                activeTab: _activeTab,
-                onTabChanged: (tab) => setState(() => _activeTab = tab),
-                onRecordTap: _toggleRecording,
-                isRecording: _isRecording,
-                isBusy: _isRecording || _isUploading,
-              ),
-            ),
-            if (_isUploading) _buildUploadOverlay(context),
           ],
         ),
       ),
@@ -375,30 +399,45 @@ class _RecorderScreenState extends State<RecorderScreen> {
 
   Widget _buildHeader(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 8, 16, 16),
+      padding: const EdgeInsets.fromLTRB(24, 8, 16, 8),
       child: Row(
         children: [
-          Text(
-            'DROP',
-            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.5,
-                ),
-          ),
+          if (!_searchExpanded)
+            Text(
+              'DROP',
+              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1.5,
+                  ),
+            ),
+          if (_searchExpanded) const SizedBox.shrink(),
           const Spacer(),
-          IconButton(
-            onPressed: widget.onToggleTheme,
-            style: IconButton.styleFrom(
-              side: BorderSide(color: DropColors.border(context)),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+          NoteSearchBar(
+            controller: _searchController,
+            isExpanded: _searchExpanded,
+            onToggle: () => setState(() => _searchExpanded = !_searchExpanded),
+            onChanged: (q) => setState(
+              () => _filters = _filters.copyWith(searchQuery: q),
+            ),
+          ),
+          if (!_searchExpanded) ...[
+            const SizedBox(width: 8),
+            IconButton(
+              onPressed: widget.onToggleTheme,
+              style: IconButton.styleFrom(
+                side: BorderSide(color: DropColors.border(context)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              icon: Icon(
+                widget.isDarkMode
+                    ? Icons.wb_sunny_outlined
+                    : Icons.dark_mode_outlined,
+                size: 18,
               ),
             ),
-            icon: Icon(
-              widget.isDarkMode ? Icons.wb_sunny_outlined : Icons.dark_mode_outlined,
-              size: 18,
-            ),
-          ),
+          ],
         ],
       ),
     );
@@ -406,22 +445,32 @@ class _RecorderScreenState extends State<RecorderScreen> {
 
   Widget _buildSubHeader(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: DropColors.border(context))),
       ),
       child: Row(
         children: [
           if (_activeTab == DropNavTab.file) ...[
-            Icon(Icons.tune, size: 18, color: DropColors.muted(context)),
+            Icon(
+              Icons.tune,
+              size: 18,
+              color: _filters.hasActiveFilters
+                  ? DropColors.recordRed
+                  : DropColors.muted(context),
+            ),
             const SizedBox(width: 8),
             Text(
-              'FILTRO ATTIVO',
-              style: Theme.of(context).textTheme.labelSmall,
+              _filters.hasActiveFilters ? 'FILTRO ATTIVO' : 'TUTTE LE NOTE',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: _filters.hasActiveFilters
+                        ? DropColors.recordRed
+                        : null,
+                  ),
             ),
             const Spacer(),
             Text(
-              'NOTE (${_notes.length})',
+              'NOTE (${_filteredNotes.length})',
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     fontSize: 12,
                     letterSpacing: 1.4,
@@ -440,6 +489,19 @@ class _RecorderScreenState extends State<RecorderScreen> {
     );
   }
 
+  Widget _buildFiltersSection(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+      child: NoteFilterBar(
+        filters: _filters,
+        onDateChanged: (f) =>
+            setState(() => _filters = _filters.copyWith(dateFilter: f)),
+        onTagChanged: (f) =>
+            setState(() => _filters = _filters.copyWith(tagFilter: f)),
+      ),
+    );
+  }
+
   Widget _buildBody(BuildContext context) {
     if (_activeTab == DropNavTab.settings) {
       return _buildSettingsPlaceholder(context);
@@ -450,70 +512,59 @@ class _RecorderScreenState extends State<RecorderScreen> {
     }
 
     if (_notes.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(32, 0, 32, 120),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.mic_none_outlined,
-                size: 48,
-                color: DropColors.muted(context),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Nessuna nota',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Tocca il pulsante rosso in basso per registrare il tuo primo audio.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-            ],
-          ),
-        ),
+      return _buildEmptyState(
+        context,
+        title: 'Nessuna nota',
+        subtitle:
+            'Tocca il pulsante rosso in basso per registrare il tuo primo audio.',
+      );
+    }
+
+    if (_filteredNotes.isEmpty) {
+      return _buildEmptyState(
+        context,
+        title: 'Nessun risultato',
+        subtitle: 'Prova a modificare i filtri o la ricerca.',
       );
     }
 
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(24, 16, 24, 130),
-      itemCount: _notes.length,
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
+      itemCount: _filteredNotes.length,
       separatorBuilder: (_, _) => const SizedBox(height: 16),
       itemBuilder: (context, index) {
-        final note = _notes[index];
+        final note = _filteredNotes[index];
         return NoteListCard(
           note: note,
           dateLabel: _formatNoteDate(note.dateTime),
-          onTap: () => _openNoteDetail(note),
+          onTap: note.isProcessing ? null : () => _openNoteDetail(note),
           onDelete: () => _deleteNote(note),
         );
       },
     );
   }
 
-  Widget _buildSettingsPlaceholder(BuildContext context) {
+  Widget _buildEmptyState(
+    BuildContext context, {
+    required String title,
+    required String subtitle,
+  }) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(32, 0, 32, 120),
+        padding: const EdgeInsets.fromLTRB(32, 0, 32, 16),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
-              Icons.construction_outlined,
-              size: 40,
+              Icons.mic_none_outlined,
+              size: 48,
               color: DropColors.muted(context),
             ),
             const SizedBox(height: 16),
-            Text(
-              'In arrivo',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
+            Text(title, style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
             Text(
-              'Wallet, impostazioni AI, backup e stato server saranno disponibili in una prossima versione.',
+              subtitle,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium,
             ),
@@ -523,41 +574,27 @@ class _RecorderScreenState extends State<RecorderScreen> {
     );
   }
 
-  Widget _buildUploadOverlay(BuildContext context) {
-    return Container(
-      color: Colors.black54,
-      child: Center(
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 40),
-          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: DropColors.border(context)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(
-                width: 32,
-                height: 32,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                'TRASCRIZIONE IN CORSO',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Invio audio e elaborazione AI...',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-            ],
-          ),
+  Widget _buildSettingsPlaceholder(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(32, 0, 32, 16),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.construction_outlined,
+              size: 40,
+              color: DropColors.muted(context),
+            ),
+            const SizedBox(height: 16),
+            Text('In arrivo', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Text(
+              'Wallet, impostazioni AI, backup e stato server saranno disponibili in una prossima versione.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ],
         ),
       ),
     );
