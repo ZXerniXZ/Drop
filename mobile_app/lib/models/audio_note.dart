@@ -7,6 +7,7 @@ class AudioNote {
     required this.transcription,
     required this.summary,
     this.rawTranscription = '',
+    this.durationSeconds = 0,
   });
 
   final String id;
@@ -16,6 +17,7 @@ class AudioNote {
   final String transcription;
   final String summary;
   final String rawTranscription;
+  final int durationSeconds;
 
   static String titleFromDateTime(DateTime dateTime) {
     final day = dateTime.day.toString().padLeft(2, '0');
@@ -24,6 +26,25 @@ class AudioNote {
     final minute = dateTime.minute.toString().padLeft(2, '0');
     return 'Nota $day/$month $hour:$minute';
   }
+
+  /// Es. `15m 56s`, `45s`, `1h 2m 3s`
+  static String formatDurationLabel(int totalSeconds) {
+    if (totalSeconds <= 0) return '';
+
+    final hours = totalSeconds ~/ 3600;
+    final minutes = (totalSeconds % 3600) ~/ 60;
+    final seconds = totalSeconds % 60;
+
+    if (hours > 0) {
+      return '${hours}h ${minutes}m ${seconds}s';
+    }
+    if (minutes > 0) {
+      return '${minutes}m ${seconds}s';
+    }
+    return '${seconds}s';
+  }
+
+  String get durationLabel => formatDurationLabel(durationSeconds);
 
   factory AudioNote.fromMap(Map<String, Object?> map) {
     return AudioNote(
@@ -34,6 +55,7 @@ class AudioNote {
       transcription: map['transcription'] as String? ?? '',
       summary: map['summary'] as String? ?? '',
       rawTranscription: map['raw_transcription'] as String? ?? '',
+      durationSeconds: map['duration_seconds'] as int? ?? 0,
     );
   }
 
@@ -46,6 +68,7 @@ class AudioNote {
       'transcription': transcription,
       'summary': summary,
       'raw_transcription': rawTranscription,
+      'duration_seconds': durationSeconds,
     };
   }
 }
