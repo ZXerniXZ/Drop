@@ -203,6 +203,27 @@ curl -I http://localhost:8083/docs
 
 ---
 
+## Installazione app Android (GitHub Releases)
+
+Ogni modifica in `mobile_app/` su `main` compila automaticamente l'APK e lo pubblica come **GitHub Release**.
+
+### Scaricare l'APK sul telefono
+
+Link diretto all'ultima versione:
+
+**https://github.com/ZXerniXZ/Drop/releases/latest/download/drop-release.apk**
+
+1. Apri il link dal **browser** del telefono (Chrome/Firefox)
+2. Scarica `drop-release.apk`
+3. Abilita **Installa app sconosciute** per il browser se richiesto
+4. Apri il file scaricato e installa
+
+Tutte le release: https://github.com/ZXerniXZ/Drop/releases
+
+> Incrementa `version:` in `mobile_app/pubspec.yaml` (es. `1.0.0+5`) prima di ogni nuova release, così il tag GitHub resta univoco.
+
+---
+
 ## Convenzioni Git
 
 - **Branch**: `feature/nome`, `bugfix/nome`, `chore/nome` — mai commit diretti su `main`.
