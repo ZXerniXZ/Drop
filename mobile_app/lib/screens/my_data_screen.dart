@@ -216,235 +216,273 @@ class _MyDataScreenState extends State<MyDataScreen> {
     return RefreshIndicator(
       onRefresh: _loadAll,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+        padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
         children: [
-          _AccountCard(
-            email: SupabaseAuthService.instance.currentUser?.email,
-            onSignOut: _signOut,
-          ),
-          const SizedBox(height: 16),
-          _UsageCard(stats: _usage!),
-          const SizedBox(height: 16),
-          _AiSettingsCard(
-            prefs: _aiPrefs,
-            promptController: _promptController,
-            onChanged: _saveAiPreferences,
-          ),
-          const SizedBox(height: 16),
-          _OpenRouterCard(
-            apiKeyController: _apiKeyController,
-            hasCustomKey: _hasCustomApiKey,
-            obscureApiKey: _obscureApiKey,
-            isTesting: _isTestingApiKey,
-            onToggleObscure: () =>
-                setState(() => _obscureApiKey = !_obscureApiKey),
-            onSave: _saveOpenRouterApiKey,
-            onClear: _clearOpenRouterApiKey,
-            onTest: _testOpenRouterApiKey,
-          ),
-          const SizedBox(height: 16),
-          _NoteTagsCard(
-            config: _noteTags,
-            onChanged: _saveNoteTags,
-          ),
-          const SizedBox(height: 16),
-          _StorageCard(
-            storage: _storage!,
-            isClearing: _isClearing,
-            onClearCache: _clearCache,
-            onExportBackup: _exportBackup,
-          ),
-          const SizedBox(height: 16),
-          _ServerStatusCard(status: _serverStatus),
-        ],
-      ),
-    );
-  }
-}
-
-class _AccountCard extends StatelessWidget {
-  const _AccountCard({
-    required this.email,
-    required this.onSignOut,
-  });
-
-  final String? email;
-  final VoidCallback onSignOut;
-
-  @override
-  Widget build(BuildContext context) {
-    return _SectionCard(
-      icon: Icons.person_outline,
-      title: 'Account',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            email ?? 'Utente connesso',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          const SizedBox(height: 16),
-          _ActionButton(
-            label: 'Esci',
-            icon: Icons.logout,
-            isDestructive: true,
-            onTap: onSignOut,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SectionCard extends StatelessWidget {
-  const _SectionCard({
-    required this.icon,
-    required this.title,
-    required this.child,
-  });
-
-  final IconData icon;
-  final String title;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Theme.of(context).brightness == Brightness.dark
-            ? DropColors.darkSurface
-            : DropColors.lightSurface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: DropColors.border(context)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
+          const _SettingsSectionLabel('Account'),
+          const SizedBox(height: 8),
+          _SettingsGroup(
             children: [
-              Icon(icon, size: 16),
-              const SizedBox(width: 10),
-              Text(
-                title,
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.2,
-                      fontSize: 11,
-                    ),
+              _AccountRow(email: SupabaseAuthService.instance.currentUser?.email),
+              _GroupDivider(),
+              _SettingsActionRow(
+                label: 'Esci',
+                icon: Icons.logout,
+                isDestructive: true,
+                onTap: _signOut,
               ),
             ],
           ),
-          const Divider(height: 24),
-          child,
+          const SizedBox(height: 28),
+          const _SettingsSectionLabel('Attività'),
+          const SizedBox(height: 8),
+          _UsageSummary(stats: _usage!),
+          const SizedBox(height: 28),
+          const _SettingsSectionLabel('Intelligenza artificiale'),
+          const SizedBox(height: 8),
+          _SettingsGroup(
+            children: [
+              _AiPreferencesSection(
+                prefs: _aiPrefs,
+                promptController: _promptController,
+                onChanged: _saveAiPreferences,
+              ),
+              _GroupDivider(),
+              _OpenRouterSection(
+                apiKeyController: _apiKeyController,
+                hasCustomKey: _hasCustomApiKey,
+                obscureApiKey: _obscureApiKey,
+                isTesting: _isTestingApiKey,
+                onToggleObscure: () =>
+                    setState(() => _obscureApiKey = !_obscureApiKey),
+                onSave: _saveOpenRouterApiKey,
+                onClear: _clearOpenRouterApiKey,
+                onTest: _testOpenRouterApiKey,
+              ),
+              _GroupDivider(),
+              _NoteTagsSection(
+                config: _noteTags,
+                onChanged: _saveNoteTags,
+              ),
+            ],
+          ),
+          const SizedBox(height: 28),
+          const _SettingsSectionLabel('Sistema'),
+          const SizedBox(height: 8),
+          _SettingsGroup(
+            children: [
+              _StorageSection(
+                storage: _storage!,
+                isClearing: _isClearing,
+                onClearCache: _clearCache,
+                onExportBackup: _exportBackup,
+              ),
+              _GroupDivider(),
+              _ServerStatusRow(status: _serverStatus),
+            ],
+          ),
         ],
       ),
     );
   }
 }
 
-class _UsageCard extends StatelessWidget {
-  const _UsageCard({required this.stats});
+class _SettingsSectionLabel extends StatelessWidget {
+  const _SettingsSectionLabel(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      label.toUpperCase(),
+      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.8,
+            color: DropColors.muted(context),
+          ),
+    );
+  }
+}
+
+class _SettingsGroup extends StatelessWidget {
+  const _SettingsGroup({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? DropColors.darkSurface : DropColors.lightSurface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: DropColors.border(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children,
+      ),
+    );
+  }
+}
+
+class _GroupDivider extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Divider(
+      height: 1,
+      thickness: 1,
+      indent: 20,
+      endIndent: 20,
+      color: DropColors.border(context),
+    );
+  }
+}
+
+class _AccountRow extends StatelessWidget {
+  const _AccountRow({required this.email});
+
+  final String? email;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+      child: Row(
+        children: [
+          Icon(Icons.person_outline, size: 20, color: DropColors.muted(context)),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  email ?? 'Utente connesso',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontSize: 14,
+                      ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Account Supabase',
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingsActionRow extends StatelessWidget {
+  const _SettingsActionRow({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+    this.isDestructive = false,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool isDestructive;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isDestructive ? DropColors.recordRed : null;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: color),
+            const SizedBox(width: 14),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontSize: 14,
+                    color: color,
+                  ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _UsageSummary extends StatelessWidget {
+  const _UsageSummary({required this.stats});
 
   final UsageStats stats;
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final minutesLabel = stats.minutesThisMonth >= 10
         ? stats.minutesThisMonth.round().toString()
         : stats.minutesThisMonth.toStringAsFixed(1);
 
-    return _SectionCard(
-      icon: Icons.pie_chart_outline,
-      title: 'Attività del mese',
-      child: Column(
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: isDark ? DropColors.darkSurface : DropColors.lightSurface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: DropColors.border(context)),
+      ),
+      child: Row(
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Minuti registrati',
-                      style: Theme.of(context).textTheme.labelSmall,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '$minutesLabel / ${stats.monthlyGoalMinutes} min',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w300,
-                          ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${stats.notesThisMonth} note questo mese',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            fontSize: 12,
-                          ),
-                    ),
-                  ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Minuti questo mese',
+                  style: Theme.of(context).textTheme.labelSmall,
                 ),
-              ),
-              SizedBox(
-                width: 56,
-                height: 56,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    CircularProgressIndicator(
-                      value: stats.progress.clamp(0.0, 1.0),
-                      strokeWidth: 3,
-                      backgroundColor: DropColors.border(context),
-                    ),
-                    Text(
-                      '${stats.progressPercent}%',
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 10,
-                          ),
-                    ),
-                  ],
+                const SizedBox(height: 6),
+                Text(
+                  '$minutesLabel / ${stats.monthlyGoalMinutes} min',
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w300,
+                      ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 8),
+                Text(
+                  '${stats.notesThisMonth} note · \$${stats.estimatedApiCostUsd.toStringAsFixed(2)} API stimate',
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 16),
-          const Divider(height: 1),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Costo API stimato',
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '\$${stats.estimatedApiCostUsd.toStringAsFixed(2)}',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ],
-              ),
-              Text(
-                'Obiettivo personale',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      fontSize: 9,
-                      color: DropColors.muted(context),
-                    ),
-              ),
-            ],
+          SizedBox(
+            width: 52,
+            height: 52,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                CircularProgressIndicator(
+                  value: stats.progress.clamp(0.0, 1.0),
+                  strokeWidth: 3,
+                  backgroundColor: DropColors.border(context),
+                ),
+                Text(
+                  '${stats.progressPercent}%',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 10,
+                      ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -452,8 +490,176 @@ class _UsageCard extends StatelessWidget {
   }
 }
 
-class _NoteTagsCard extends StatefulWidget {
-  const _NoteTagsCard({
+class _AiPreferencesSection extends StatelessWidget {
+  const _AiPreferencesSection({
+    required this.prefs,
+    required this.promptController,
+    required this.onChanged,
+  });
+
+  final AiPreferences prefs;
+  final TextEditingController promptController;
+  final Future<void> Function(AiPreferences) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _FieldLabel(label: 'Modello'),
+          const SizedBox(height: 8),
+          _StyledDropdown<AiModel>(
+            value: prefs.model,
+            items: AiModel.values,
+            labelBuilder: (m) => m.label,
+            onChanged: (v) => onChanged(prefs.copyWith(model: v)),
+          ),
+          const SizedBox(height: 14),
+          _FieldLabel(label: 'Lingua trascrizione'),
+          const SizedBox(height: 8),
+          _StyledDropdown<TranscriptionLanguage>(
+            value: prefs.transcriptionLanguage,
+            items: TranscriptionLanguage.values,
+            labelBuilder: (l) => l.label,
+            onChanged: (v) => onChanged(prefs.copyWith(transcriptionLanguage: v)),
+          ),
+          const SizedBox(height: 14),
+          _FieldLabel(label: 'Prompt personalizzato'),
+          const SizedBox(height: 8),
+          TextField(
+            controller: promptController,
+            maxLines: 3,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 13),
+            decoration: _inputDecoration(
+              context,
+              hint: 'Es: Traduci sempre in inglese, usa un tono formale...',
+            ),
+            onChanged: (v) => onChanged(prefs.copyWith(customPrompt: v)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OpenRouterSection extends StatelessWidget {
+  const _OpenRouterSection({
+    required this.apiKeyController,
+    required this.hasCustomKey,
+    required this.obscureApiKey,
+    required this.isTesting,
+    required this.onToggleObscure,
+    required this.onSave,
+    required this.onClear,
+    required this.onTest,
+  });
+
+  final TextEditingController apiKeyController;
+  final bool hasCustomKey;
+  final bool obscureApiKey;
+  final bool isTesting;
+  final VoidCallback onToggleObscure;
+  final Future<void> Function() onSave;
+  final Future<void> Function() onClear;
+  final Future<void> Function() onTest;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _FieldLabel(label: 'OpenRouter'),
+              ),
+              Text(
+                hasCustomKey ? 'Chiave personale' : 'Server Drop',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: hasCustomKey ? Colors.blue : Colors.green,
+                    ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Lascia vuoto per usare il server Drop.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: DropColors.muted(context),
+                  fontSize: 11,
+                ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: apiKeyController,
+            obscureText: obscureApiKey,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  fontSize: 13,
+                  fontFamily: 'monospace',
+                ),
+            decoration: _inputDecoration(context, hint: 'sk-or-...').copyWith(
+              isDense: true,
+              suffixIcon: IconButton(
+                onPressed: onToggleObscure,
+                icon: Icon(
+                  obscureApiKey
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                  size: 18,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: isTesting ? null : onTest,
+                  child: isTesting
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Testa'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FilledButton(
+                  onPressed: onSave,
+                  child: const Text('Salva'),
+                ),
+              ),
+            ],
+          ),
+          if (hasCustomKey) ...[
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: onClear,
+                child: const Text(
+                  'Rimuovi chiave',
+                  style: TextStyle(color: DropColors.recordRed),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _NoteTagsSection extends StatefulWidget {
+  const _NoteTagsSection({
     required this.config,
     required this.onChanged,
   });
@@ -462,10 +668,10 @@ class _NoteTagsCard extends StatefulWidget {
   final Future<void> Function(NoteTagsConfig) onChanged;
 
   @override
-  State<_NoteTagsCard> createState() => _NoteTagsCardState();
+  State<_NoteTagsSection> createState() => _NoteTagsSectionState();
 }
 
-class _NoteTagsCardState extends State<_NoteTagsCard> {
+class _NoteTagsSectionState extends State<_NoteTagsSection> {
   final _newTagController = TextEditingController();
 
   @override
@@ -493,16 +699,18 @@ class _NoteTagsCardState extends State<_NoteTagsCard> {
 
   @override
   Widget build(BuildContext context) {
-    return _SectionCard(
-      icon: Icons.label_outline,
-      title: 'Tag note',
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          const _FieldLabel(label: 'Tag note'),
+          const SizedBox(height: 4),
           Text(
             'L\'AI sceglie un tag da questa lista dopo ogni trascrizione.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: DropColors.muted(context),
+                  fontSize: 11,
                 ),
           ),
           const SizedBox(height: 12),
@@ -520,24 +728,17 @@ class _NoteTagsCardState extends State<_NoteTagsCard> {
               );
             }).toList(),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Row(
             children: [
               Expanded(
                 child: TextField(
                   controller: _newTagController,
-                  decoration: InputDecoration(
-                    hintText: 'Nuovo tag...',
-                    isDense: true,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide(color: DropColors.border(context)),
-                    ),
-                  ),
+                  decoration: _inputDecoration(context, hint: 'Nuovo tag...'),
                   onSubmitted: (_) => _addTag(),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 4),
               IconButton(
                 onPressed: _addTag,
                 icon: const Icon(Icons.add, size: 20),
@@ -550,209 +751,8 @@ class _NoteTagsCardState extends State<_NoteTagsCard> {
   }
 }
 
-class _AiSettingsCard extends StatelessWidget {
-  const _AiSettingsCard({
-    required this.prefs,
-    required this.promptController,
-    required this.onChanged,
-  });
-
-  final AiPreferences prefs;
-  final TextEditingController promptController;
-  final Future<void> Function(AiPreferences) onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return _SectionCard(
-      icon: Icons.memory_outlined,
-      title: 'Intelligenza artificiale',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _FieldLabel(label: 'Modello di elaborazione'),
-          const SizedBox(height: 8),
-          _StyledDropdown<AiModel>(
-            value: prefs.model,
-            items: AiModel.values,
-            labelBuilder: (m) => m.label,
-            onChanged: (v) => onChanged(prefs.copyWith(model: v)),
-          ),
-          const SizedBox(height: 16),
-          _FieldLabel(label: 'Lingua trascrizione'),
-          const SizedBox(height: 8),
-          _StyledDropdown<TranscriptionLanguage>(
-            value: prefs.transcriptionLanguage,
-            items: TranscriptionLanguage.values,
-            labelBuilder: (l) => l.label,
-            onChanged: (v) => onChanged(prefs.copyWith(transcriptionLanguage: v)),
-          ),
-          const SizedBox(height: 16),
-          _FieldLabel(label: 'Prompt personalizzato'),
-          const SizedBox(height: 8),
-          TextField(
-            controller: promptController,
-            maxLines: 3,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 13),
-            decoration: InputDecoration(
-              hintText: 'Es: Traduci sempre in inglese, usa un tono formale...',
-              hintStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontSize: 12,
-                    color: DropColors.muted(context),
-                  ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: DropColors.border(context)),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: DropColors.border(context)),
-              ),
-              filled: true,
-              fillColor: Theme.of(context).brightness == Brightness.dark
-                  ? Colors.white.withValues(alpha: 0.02)
-                  : Colors.black.withValues(alpha: 0.02),
-            ),
-            onChanged: (v) => onChanged(prefs.copyWith(customPrompt: v)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _OpenRouterCard extends StatelessWidget {
-  const _OpenRouterCard({
-    required this.apiKeyController,
-    required this.hasCustomKey,
-    required this.obscureApiKey,
-    required this.isTesting,
-    required this.onToggleObscure,
-    required this.onSave,
-    required this.onClear,
-    required this.onTest,
-  });
-
-  final TextEditingController apiKeyController;
-  final bool hasCustomKey;
-  final bool obscureApiKey;
-  final bool isTesting;
-  final VoidCallback onToggleObscure;
-  final Future<void> Function() onSave;
-  final Future<void> Function() onClear;
-  final Future<void> Function() onTest;
-
-  @override
-  Widget build(BuildContext context) {
-    final modeColor = hasCustomKey ? Colors.blue : Colors.green;
-    final modeLabel = hasCustomKey ? 'Chiave personale' : 'Server Drop';
-
-    return _SectionCard(
-      icon: Icons.key_outlined,
-      title: 'OpenRouter',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Lascia vuoto per usare il server Drop.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: DropColors.muted(context),
-                ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: modeColor.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  modeLabel,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: modeColor,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 10,
-                      ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: apiKeyController,
-            obscureText: obscureApiKey,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontSize: 13,
-                  fontFamily: 'monospace',
-                ),
-            decoration: InputDecoration(
-              hintText: 'sk-or-...',
-              isDense: true,
-              suffixIcon: IconButton(
-                onPressed: onToggleObscure,
-                icon: Icon(
-                  obscureApiKey ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                  size: 18,
-                ),
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: DropColors.border(context)),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: DropColors.border(context)),
-              ),
-              filled: true,
-              fillColor: Theme.of(context).brightness == Brightness.dark
-                  ? Colors.white.withValues(alpha: 0.02)
-                  : Colors.black.withValues(alpha: 0.02),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: isTesting ? null : onTest,
-                  child: isTesting
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Testa connessione'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: FilledButton(
-                  onPressed: onSave,
-                  child: const Text('Salva'),
-                ),
-              ),
-            ],
-          ),
-          if (hasCustomKey) ...[
-            const SizedBox(height: 8),
-            TextButton(
-              onPressed: onClear,
-              child: const Text(
-                'Rimuovi chiave',
-                style: TextStyle(color: DropColors.recordRed),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _StorageCard extends StatelessWidget {
-  const _StorageCard({
+class _StorageSection extends StatelessWidget {
+  const _StorageSection({
     required this.storage,
     required this.isClearing,
     required this.onClearCache,
@@ -766,9 +766,8 @@ class _StorageCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _SectionCard(
-      icon: Icons.storage_outlined,
-      title: 'Archiviazione',
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -776,9 +775,9 @@ class _StorageCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'Spazio occupato (audio)',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontSize: 13,
+                'Cache audio',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontSize: 14,
                     ),
               ),
               Text(
@@ -790,24 +789,45 @@ class _StorageCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 2),
           Text(
-            '${storage.fileCount} file .m4a',
+            '${storage.fileCount} file .m4a locali',
             style: Theme.of(context).textTheme.labelSmall,
           ),
-          const SizedBox(height: 16),
-          _ActionButton(
-            label: 'Svuota cache audio',
-            icon: Icons.delete_outline,
-            isDestructive: true,
-            isLoading: isClearing,
-            onTap: onClearCache,
+          const SizedBox(height: 14),
+          OutlinedButton.icon(
+            onPressed: isClearing ? null : onClearCache,
+            icon: isClearing
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.delete_outline, size: 16),
+            label: const Text('Svuota cache audio'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: DropColors.recordRed,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              side: BorderSide(
+                color: DropColors.recordRed.withValues(alpha: 0.3),
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
           ),
-          const SizedBox(height: 10),
-          _ActionButton(
-            label: 'Esporta backup JSON',
-            icon: Icons.download_outlined,
-            onTap: onExportBackup,
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: onExportBackup,
+            icon: const Icon(Icons.download_outlined, size: 16),
+            label: const Text('Esporta backup JSON'),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              side: BorderSide(color: DropColors.border(context)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
           ),
         ],
       ),
@@ -815,8 +835,8 @@ class _StorageCard extends StatelessWidget {
   }
 }
 
-class _ServerStatusCard extends StatelessWidget {
-  const _ServerStatusCard({required this.status});
+class _ServerStatusRow extends StatelessWidget {
+  const _ServerStatusRow({required this.status});
 
   final ServerStatus status;
 
@@ -835,70 +855,60 @@ class _ServerStatusCard extends StatelessWidget {
             ? 'Online'
             : 'Offline';
 
-    return _SectionCard(
-      icon: Icons.wifi,
-      title: 'Stato server',
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: Theme.of(context).brightness == Brightness.dark
-              ? Colors.white.withValues(alpha: 0.02)
-              : Colors.black.withValues(alpha: 0.02),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: DropColors.border(context)),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Endpoint attivo',
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    productionApiBaseUrl.replaceFirst('https://', ''),
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          letterSpacing: 0.3,
-                          color: Theme.of(context).colorScheme.onSurface,
-                        ),
-                  ),
-                ],
-              ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+      child: Row(
+        children: [
+          Icon(Icons.cloud_outlined, size: 20, color: DropColors.muted(context)),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Server Drop',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontSize: 14,
+                      ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  productionApiBaseUrl.replaceFirst('https://', ''),
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+              ],
             ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      color: color,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    label,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: color,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 9,
-                        ),
-                  ),
-                ],
-              ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(20),
             ),
-          ],
-        ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: color,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 9,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -920,6 +930,30 @@ class _FieldLabel extends StatelessWidget {
   }
 }
 
+InputDecoration _inputDecoration(BuildContext context, {required String hint}) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+
+  return InputDecoration(
+    hintText: hint,
+    hintStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          fontSize: 12,
+          color: DropColors.muted(context),
+        ),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide(color: DropColors.border(context)),
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide(color: DropColors.border(context)),
+    ),
+    filled: true,
+    fillColor: isDark
+        ? Colors.white.withValues(alpha: 0.02)
+        : Colors.black.withValues(alpha: 0.02),
+  );
+}
+
 class _StyledDropdown<T> extends StatelessWidget {
   const _StyledDropdown({
     required this.value,
@@ -935,12 +969,14 @@ class _StyledDropdown<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: DropColors.border(context)),
-        color: Theme.of(context).brightness == Brightness.dark
+        color: isDark
             ? Colors.white.withValues(alpha: 0.02)
             : Colors.black.withValues(alpha: 0.02),
       ),
@@ -961,50 +997,6 @@ class _StyledDropdown<T> extends StatelessWidget {
             if (v != null) onChanged(v);
           },
         ),
-      ),
-    );
-  }
-}
-
-class _ActionButton extends StatelessWidget {
-  const _ActionButton({
-    required this.label,
-    required this.icon,
-    required this.onTap,
-    this.isDestructive = false,
-    this.isLoading = false,
-  });
-
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-  final bool isDestructive;
-  final bool isLoading;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = isDestructive ? DropColors.recordRed : null;
-
-    return OutlinedButton.icon(
-      onPressed: isLoading ? null : onTap,
-      icon: isLoading
-          ? const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : Icon(icon, size: 16, color: color),
-      label: Text(label),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: color,
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        side: BorderSide(
-          color: isDestructive
-              ? DropColors.recordRed.withValues(alpha: 0.3)
-              : DropColors.border(context),
-        ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        textStyle: Theme.of(context).textTheme.labelSmall,
       ),
     );
   }

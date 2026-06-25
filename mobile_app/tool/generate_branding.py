@@ -9,8 +9,10 @@ from pathlib import Path
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC_DARK = ROOT / "assets/branding/source/logo_dark.png"
-SRC_LIGHT = ROOT / "assets/branding/source/logo_light.png"
+# logo_light.png = white droplet on black (dark UI / app icon)
+# logo_dark.png = black droplet on white (light UI)
+SRC_DARK_UI = ROOT / "assets/branding/source/logo_light.png"
+SRC_LIGHT_UI = ROOT / "assets/branding/source/logo_dark.png"
 
 OUT = ROOT / "assets/branding"
 ANDROID_RES = ROOT / "android/app/src/main/res"
@@ -86,19 +88,20 @@ def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     IOS_ICON_DIR.mkdir(parents=True, exist_ok=True)
 
-    dark_sq = crop_droplet_square(SRC_DARK, True)
-    light_sq = crop_droplet_square(SRC_LIGHT, False)
+    dark_ui_sq = crop_droplet_square(SRC_DARK_UI, True)
+    light_ui_sq = crop_droplet_square(SRC_LIGHT_UI, False)
 
-    make_transparent(dark_sq, True).resize((112, 112), Image.Resampling.LANCZOS).save(
+    make_transparent(dark_ui_sq, True).resize((112, 112), Image.Resampling.LANCZOS).save(
         OUT / "logo_header_dark.png"
     )
-    make_transparent(light_sq, False).resize((112, 112), Image.Resampling.LANCZOS).save(
+    make_transparent(light_ui_sq, False).resize((112, 112), Image.Resampling.LANCZOS).save(
         OUT / "logo_header_light.png"
     )
 
-    dark_icon = make_app_icon(dark_sq, True)
-    light_icon = make_app_icon(light_sq, False)
-    dark_icon.save(OUT / "app_icon_dark_1024.png")
+    app_icon = make_app_icon(dark_ui_sq, True)
+    light_icon = make_app_icon(light_ui_sq, False)
+    app_icon_fg = make_transparent(dark_ui_sq, True)
+    app_icon.save(OUT / "app_icon_dark_1024.png")
     light_icon.save(OUT / "app_icon_light_1024.png")
 
     for folder, sz in {
@@ -110,8 +113,14 @@ def main() -> None:
     }.items():
         d = ANDROID_RES / folder
         d.mkdir(parents=True, exist_ok=True)
-        dark_icon.resize((sz, sz), Image.Resampling.LANCZOS).save(d / "ic_launcher.png")
+        app_icon.resize((sz, sz), Image.Resampling.LANCZOS).save(d / "ic_launcher.png")
         light_icon.resize((sz, sz), Image.Resampling.LANCZOS).save(d / "ic_launcher_light.png")
+        fg_sz = int(sz * 0.72)
+        fg = app_icon_fg.resize((fg_sz, fg_sz), Image.Resampling.LANCZOS)
+        fg_canvas = Image.new("RGBA", (sz, sz), (0, 0, 0, 0))
+        offset = (sz - fg_sz) // 2
+        fg_canvas.paste(fg, (offset, offset), fg)
+        fg_canvas.save(d / "ic_launcher_foreground.png")
 
     for name, icon, sizes in [
         ("light", light_icon, ((120, 180),)),
@@ -139,7 +148,7 @@ def main() -> None:
         "Icon-App-1024x1024@1x.png": 1024,
     }
     for name, sz in mapping.items():
-        dark_icon.resize((sz, sz), Image.Resampling.LANCZOS).save(APPICON / name)
+        app_icon.resize((sz, sz), Image.Resampling.LANCZOS).save(APPICON / name)
 
     print("Branding assets regenerated.")
 

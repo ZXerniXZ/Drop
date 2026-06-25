@@ -39,13 +39,6 @@ class SupabaseAuthService {
     await _client.auth.signUp(email: email, password: password);
   }
 
-  Future<void> signInWithMagicLink({required String email}) async {
-    await _client.auth.signInWithOtp(
-      email: email,
-      emailRedirectTo: SupabaseConfig.oauthRedirectUri,
-    );
-  }
-
   Future<void> signInWithGoogle() => _signInWithOAuth(OAuthProvider.google);
 
   Future<void> signInWithGitHub() => _signInWithOAuth(OAuthProvider.github);

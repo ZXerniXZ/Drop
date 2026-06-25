@@ -86,24 +86,6 @@ class _LoginScreenState extends State<LoginScreen> {
     });
   }
 
-  Future<void> _sendMagicLink() async {
-    final email = _emailController.text.trim();
-    if (email.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Inserisci la tua email')),
-      );
-      return;
-    }
-
-    await _runAuth(() async {
-      await SupabaseAuthService.instance.signInWithMagicLink(email: email);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Magic link inviato — controlla la email')),
-      );
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     final muted = DropColors.muted(context);
@@ -180,14 +162,6 @@ class _LoginScreenState extends State<LoginScreen> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : Text(_isSignUp ? 'Registrati' : 'Accedi'),
-                  ),
-                  const SizedBox(height: 10),
-                  OutlinedButton(
-                    onPressed: _isLoading ? null : _sendMagicLink,
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size.fromHeight(48),
-                    ),
-                    child: const Text('Invia magic link'),
                   ),
                   const SizedBox(height: 16),
                   TextButton(

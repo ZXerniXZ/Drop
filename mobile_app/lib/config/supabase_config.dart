@@ -10,6 +10,6 @@ class SupabaseConfig {
     defaultValue: 'YOUR_SUPABASE_ANON_KEY',
   );
 
-  /// Redirect OAuth/magic link — registrare in Supabase Dashboard → Auth → URL Configuration
+  /// Redirect OAuth — registrare in Supabase Dashboard → Auth → URL Configuration
   static const oauthRedirectUri = 'com.drop.plaudclone.drop://login-callback/';
 }
