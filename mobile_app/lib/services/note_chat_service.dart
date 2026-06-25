@@ -11,6 +11,7 @@ import 'api_url_resolver.dart';
 import 'app_preferences_service.dart';
 import 'local_database_service.dart';
 import 'openrouter_client.dart';
+import 'supabase_auth_service.dart';
 
 ChatStreamEvent? parseServerSseDataLine(String line) {
   final trimmed = line.trim();
@@ -153,8 +154,15 @@ class NoteChatService {
         .toList();
 
     final url = await ApiUrlResolver.resolveEndpoint('/chat-note/stream');
+    final accessToken = SupabaseAuthService.instance.currentAccessToken;
+    if (accessToken == null || accessToken.isEmpty) {
+      yield const ChatStreamError('Sessione scaduta. Effettua di nuovo l\'accesso.');
+      return;
+    }
+
     final body = jsonEncode({
       'message': message,
+      'note_id': note.id,
       'history': historyPayload,
       'ai_model': aiModel,
       'note_context': _noteContextFromAudioNote(note),
@@ -164,6 +172,7 @@ class NoteChatService {
     try {
       final request = http.Request('POST', Uri.parse(url))
         ..headers['Content-Type'] = 'application/json'
+        ..headers['Authorization'] = 'Bearer $accessToken'
         ..body = body;
 
       final response = await client.send(request);

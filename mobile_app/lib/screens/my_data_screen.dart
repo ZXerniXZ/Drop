@@ -8,6 +8,7 @@ import '../services/audio_storage_service.dart';
 import '../services/local_database_service.dart';
 import '../services/openrouter_client.dart';
 import '../services/server_health_service.dart';
+import '../services/supabase_auth_service.dart';
 import '../services/usage_stats_service.dart';
 import '../theme/drop_theme.dart';
 
@@ -183,6 +184,29 @@ class _MyDataScreenState extends State<MyDataScreen> {
     );
   }
 
+  Future<void> _signOut() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Esci'),
+        content: const Text('Vuoi disconnetterti dal tuo account?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Annulla'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Esci'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+    await SupabaseAuthService.instance.signOut();
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -194,6 +218,11 @@ class _MyDataScreenState extends State<MyDataScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
         children: [
+          _AccountCard(
+            email: SupabaseAuthService.instance.currentUser?.email,
+            onSignOut: _signOut,
+          ),
+          const SizedBox(height: 16),
           _UsageCard(stats: _usage!),
           const SizedBox(height: 16),
           _AiSettingsCard(
@@ -227,6 +256,40 @@ class _MyDataScreenState extends State<MyDataScreen> {
           ),
           const SizedBox(height: 16),
           _ServerStatusCard(status: _serverStatus),
+        ],
+      ),
+    );
+  }
+}
+
+class _AccountCard extends StatelessWidget {
+  const _AccountCard({
+    required this.email,
+    required this.onSignOut,
+  });
+
+  final String? email;
+  final VoidCallback onSignOut;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SectionCard(
+      icon: Icons.person_outline,
+      title: 'Account',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            email ?? 'Utente connesso',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 16),
+          _ActionButton(
+            label: 'Esci',
+            icon: Icons.logout,
+            isDestructive: true,
+            onTap: onSignOut,
+          ),
         ],
       ),
     );
