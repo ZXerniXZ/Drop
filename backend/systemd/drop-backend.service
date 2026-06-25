@@ -1,0 +1,19 @@
+[Unit]
+Description=Drop Backend (Docker Compose)
+Documentation=https://github.com/ZXerniXZ/Drop
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=ares
+Group=ares
+WorkingDirectory=/home/ares/Drop/backend
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStop=/usr/bin/docker compose down
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
