@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+/// White droplet for dark UI surfaces; black droplet for light UI surfaces.
 class DropLogo extends StatelessWidget {
   const DropLogo({
     super.key,
@@ -21,6 +22,7 @@ class DropLogo extends StatelessWidget {
       width: height,
       fit: BoxFit.contain,
       filterQuality: FilterQuality.high,
+      gaplessPlayback: true,
     );
   }
 }

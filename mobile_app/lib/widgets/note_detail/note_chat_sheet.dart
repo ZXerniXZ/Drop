@@ -49,6 +49,7 @@ class _NoteChatSheetState extends State<NoteChatSheet> {
 
   @override
   void dispose() {
+    FocusManager.instance.primaryFocus?.unfocus();
     _inputController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -414,6 +415,7 @@ void showNoteChatSheet(
   required AudioNote note,
   String? initialMessage,
 }) {
+  FocusManager.instance.primaryFocus?.unfocus();
   showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
@@ -425,5 +427,7 @@ void showNoteChatSheet(
       note: note,
       initialMessage: initialMessage,
     ),
-  );
+  ).whenComplete(() {
+    FocusManager.instance.primaryFocus?.unfocus();
+  });
 }

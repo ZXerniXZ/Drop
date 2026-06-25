@@ -27,9 +27,12 @@ class AskAiBar extends StatefulWidget {
 class _AskAiBarState extends State<AskAiBar> with TickerProviderStateMixin {
   late final FocusNode _focusNode;
   late final AnimationController _revealController;
-  late final AnimationController _loopController;
+  late final AnimationController _focusLoopController;
+  late final AnimationController _idleLoopController;
   late final AnimationController _pulseController;
   late final Animation<double> _revealAnimation;
+
+  bool get _isFocused => _focusNode.hasFocus;
 
   @override
   void initState() {
@@ -39,10 +42,14 @@ class _AskAiBarState extends State<AskAiBar> with TickerProviderStateMixin {
       vsync: this,
       duration: const Duration(milliseconds: 650),
     );
-    _loopController = AnimationController(
+    _focusLoopController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 3200),
     );
+    _idleLoopController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 9000),
+    )..repeat();
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2400),
@@ -50,6 +57,7 @@ class _AskAiBarState extends State<AskAiBar> with TickerProviderStateMixin {
     _revealAnimation = CurvedAnimation(
       parent: _revealController,
       curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
     );
   }
 
@@ -57,47 +65,60 @@ class _AskAiBarState extends State<AskAiBar> with TickerProviderStateMixin {
     if (_focusNode.hasFocus) {
       _revealController.forward().then((_) {
         if (mounted && _focusNode.hasFocus) {
-          _loopController.repeat();
+          _focusLoopController.repeat();
           _pulseController.repeat(reverse: true);
         }
       });
     } else {
-      _loopController.stop();
-      _loopController.reset();
-      _pulseController.stop();
-      _pulseController.reset();
-      _revealController.reverse();
+      _stopFocusEffects();
     }
     setState(() {});
   }
 
+  void _stopFocusEffects() {
+    _focusLoopController.stop();
+    _focusLoopController.reset();
+    _pulseController.stop();
+    _pulseController.reset();
+    _revealController.reverse();
+  }
+
   @override
   void dispose() {
+    _focusNode.unfocus();
+    _stopFocusEffects();
     _focusNode.removeListener(_onFocusChange);
     _focusNode.dispose();
     _revealController.dispose();
-    _loopController.dispose();
+    _focusLoopController.dispose();
+    _idleLoopController.dispose();
     _pulseController.dispose();
     super.dispose();
   }
 
-  Gradient _borderGradient(bool isDark, double reveal, double rotation) {
+  Gradient _borderGradient(
+    bool isDark,
+    double reveal,
+    double rotation,
+    bool focused,
+  ) {
     final angle = rotation * 2 * math.pi;
     final idleA = isDark
-        ? Colors.white.withValues(alpha: 0.22)
-        : Colors.black.withValues(alpha: 0.1);
+        ? Colors.white.withValues(alpha: 0.28)
+        : Colors.black.withValues(alpha: 0.14);
     final idleB = isDark
-        ? Colors.white.withValues(alpha: 0.08)
+        ? Colors.white.withValues(alpha: 0.06)
         : Colors.black.withValues(alpha: 0.04);
 
-    if (reveal < 1.0) {
+    if (!focused || reveal < 1.0) {
+      final t = focused ? reveal : 0.0;
       return SweepGradient(
         transform: GradientRotation(angle),
         colors: [
-          Color.lerp(idleA, const Color(0xFF5B8CFF), reveal)!,
-          Color.lerp(idleB, const Color(0xFF9B59FF), reveal)!,
-          Color.lerp(idleA, const Color(0xFF38BDF8), reveal)!,
-          Color.lerp(idleB, const Color(0xFF7C3AED), reveal)!,
+          Color.lerp(idleA, const Color(0xFF5B8CFF), t)!,
+          Color.lerp(idleB, const Color(0xFF9B59FF), t)!,
+          Color.lerp(idleA, const Color(0xFF38BDF8), t)!,
+          Color.lerp(idleB, const Color(0xFF7C3AED), t)!,
         ],
         stops: const [0.0, 0.33, 0.66, 1.0],
       );
@@ -157,12 +178,15 @@ class _AskAiBarState extends State<AskAiBar> with TickerProviderStateMixin {
         child: AnimatedBuilder(
           animation: Listenable.merge([
             _revealController,
-            _loopController,
+            _focusLoopController,
+            _idleLoopController,
             _pulseController,
           ]),
           builder: (context, child) {
             final reveal = _revealAnimation.value;
-            final rotation = _loopController.value;
+            final rotation = _isFocused
+                ? _focusLoopController.value
+                : _idleLoopController.value;
             final pulse = _pulseController.value;
             final glow = _outerGlow(reveal, pulse);
 
@@ -186,7 +210,12 @@ class _AskAiBarState extends State<AskAiBar> with TickerProviderStateMixin {
                   Container(
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(16),
-                      gradient: _borderGradient(isDark, reveal, rotation),
+                      gradient: _borderGradient(
+                        isDark,
+                        reveal,
+                        rotation,
+                        _isFocused,
+                      ),
                       boxShadow: reveal > 0.15
                           ? [
                               BoxShadow(

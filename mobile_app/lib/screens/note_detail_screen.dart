@@ -246,8 +246,6 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
               ),
         ),
         const SizedBox(height: 16),
-        _MetadataCard(dateTime: _formatTimestamp(widget.note.dateTime)),
-        const SizedBox(height: 20),
         switch (_subTab) {
           _NotesSubTab.highlights => _HighlightsTab(
               highlights: widget.note.structuredData.highlights,
@@ -259,6 +257,7 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
               blocks: widget.note.structuredData.speakerView,
             ),
           _NotesSubTab.keyData => _KeyDataTab(
+              dateTime: _formatTimestamp(widget.note.dateTime),
               location: widget.note.structuredData.location,
               participants: widget.note.structuredData.participants,
               tag: widget.note.tag,
@@ -717,11 +716,13 @@ class _SpeakerViewTab extends StatelessWidget {
 
 class _KeyDataTab extends StatelessWidget {
   const _KeyDataTab({
+    required this.dateTime,
     required this.location,
     required this.participants,
     required this.tag,
   });
 
+  final String dateTime;
   final String location;
   final List<String> participants;
   final String tag;
@@ -735,44 +736,51 @@ class _KeyDataTab extends StatelessWidget {
         : NoteDetailMockData.attendees;
     final displayTag = tag.isNotEmpty ? tag : 'Diario';
 
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Theme.of(context).brightness == Brightness.dark
-            ? Colors.white.withValues(alpha: 0.02)
-            : Colors.black.withValues(alpha: 0.02),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: DropColors.border(context)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _KeyDataRow(
-            label: 'LOCATION:',
-            value: displayLocation,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _MetadataCard(dateTime: dateTime),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Theme.of(context).brightness == Brightness.dark
+                ? Colors.white.withValues(alpha: 0.02)
+                : Colors.black.withValues(alpha: 0.02),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: DropColors.border(context)),
           ),
-          const SizedBox(height: 16),
-          const Divider(height: 1),
-          const SizedBox(height: 16),
-          Text(
-            'ATTENDEES:',
-            style: Theme.of(context).textTheme.labelSmall,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _KeyDataRow(
+                label: 'LOCATION:',
+                value: displayLocation,
+              ),
+              const SizedBox(height: 16),
+              const Divider(height: 1),
+              const SizedBox(height: 16),
+              Text(
+                'ATTENDEES:',
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                displayAttendees,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontSize: 13,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+              ),
+              const SizedBox(height: 16),
+              _KeyDataRow(
+                label: 'TAG:',
+                value: displayTag,
+              ),
+            ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            displayAttendees,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontSize: 13,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-          ),
-          const SizedBox(height: 16),
-          _KeyDataRow(
-            label: 'TAG:',
-            value: displayTag,
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
