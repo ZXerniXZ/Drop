@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 class DropLogo extends StatelessWidget {
   const DropLogo({
     super.key,
-    this.height = 28,
+    this.height = 26,
   });
 
   final double height;
@@ -15,15 +15,12 @@ class DropLogo extends StatelessWidget {
         ? 'assets/branding/logo_header_dark.png'
         : 'assets/branding/logo_header_light.png';
 
-    return Semantics(
-      label: 'Drop',
-      image: true,
-      child: Image.asset(
-        asset,
-        height: height,
-        fit: BoxFit.contain,
-        filterQuality: FilterQuality.high,
-      ),
+    return Image.asset(
+      asset,
+      height: height,
+      width: height,
+      fit: BoxFit.contain,
+      filterQuality: FilterQuality.high,
     );
   }
 }

@@ -527,7 +527,20 @@ class _RecorderScreenState extends State<RecorderScreen> {
       child: Row(
         children: [
           if (_activeTab == DropNavTab.file)
-            const DropLogo(height: 30)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const DropLogo(height: 26),
+                const SizedBox(width: 10),
+                Text(
+                  'Drop',
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.3,
+                      ),
+                ),
+              ],
+            )
           else
             Text(
               'Impostazioni',
