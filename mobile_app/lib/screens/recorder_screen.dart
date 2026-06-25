@@ -11,6 +11,8 @@ import 'package:record/record.dart';
 
 import '../config/api_config.dart';
 import '../models/audio_note.dart';
+import '../models/note_structured_data.dart';
+import '../services/app_preferences_service.dart';
 import '../models/note_filters.dart';
 import '../services/audio_recording_config.dart';
 import '../services/local_database_service.dart';
@@ -126,6 +128,16 @@ class _RecorderScreenState extends State<RecorderScreen> {
         '';
     final formatted = data['formatted_transcription'] as String? ?? raw;
     final summary = data['summary'] as String? ?? '';
+    final structured = NoteStructuredData.fromResponse(data);
+
+    NoteTag tag = placeholder.tag;
+    final keyData = data['key_data'];
+    if (keyData is Map<String, dynamic>) {
+      final tagLabel = keyData['tags'] as String?;
+      if (tagLabel != null && tagLabel.isNotEmpty) {
+        tag = NoteTag.fromString(tagLabel);
+      }
+    }
 
     return placeholder.copyWith(
       audioPath: audioPath,
@@ -133,6 +145,8 @@ class _RecorderScreenState extends State<RecorderScreen> {
       summary: summary,
       rawTranscription: raw,
       analysisStatus: NoteAnalysisStatus.ready,
+      structuredData: structured,
+      tag: tag,
     );
   }
 
@@ -187,8 +201,14 @@ class _RecorderScreenState extends State<RecorderScreen> {
   }) async {
     try {
       final url = await _resolveUploadUrl();
+      final prefs = await AppPreferencesService.instance.loadAiPreferences();
       final request = http.MultipartRequest('POST', Uri.parse(url));
       request.files.add(await http.MultipartFile.fromPath('file', filePath));
+      request.fields['ai_model'] = prefs.model.name;
+      request.fields['language'] = prefs.transcriptionLanguage.name;
+      if (prefs.customPrompt.trim().isNotEmpty) {
+        request.fields['custom_prompt'] = prefs.customPrompt.trim();
+      }
 
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);

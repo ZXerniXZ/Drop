@@ -1,7 +1,8 @@
 import uuid
 from pathlib import Path
+from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 import config  # noqa: F401
@@ -22,7 +23,12 @@ app.add_middleware(
 
 
 @app.post("/upload-audio")
-async def upload_audio(file: UploadFile = File(...)):
+async def upload_audio(
+    file: UploadFile = File(...),
+    ai_model: str | None = Form(default=None),
+    language: str | None = Form(default=None),
+    custom_prompt: str | None = Form(default=None),
+):
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
     original_name = Path(file.filename or "audio").name
@@ -34,7 +40,7 @@ async def upload_audio(file: UploadFile = File(...)):
     destination.write_bytes(content)
 
     try:
-        transcription = await transcribe_audio(str(destination))
+        transcription = await transcribe_audio(str(destination), language=language)
     except Exception as exc:
         raise HTTPException(
             status_code=502,
@@ -42,17 +48,26 @@ async def upload_audio(file: UploadFile = File(...)):
         ) from exc
 
     try:
-        processed = await process_transcript(transcription)
+        processed = await process_transcript(
+            transcription,
+            model=ai_model,
+            custom_prompt=custom_prompt,
+            language=language,
+        )
     except Exception as exc:
         raise HTTPException(
             status_code=502,
             detail=f"LLM processing failed: {exc}",
         ) from exc
 
-    return {
+    response: dict[str, Any] = {
         "success": True,
         "filename": saved_name,
         "raw_transcription": transcription,
         "formatted_transcription": processed["formatted_transcript"],
         "summary": processed["summary"],
+        "highlights": processed["highlights"],
+        "key_data": processed["key_data"],
+        "speaker_view": processed["speaker_view"],
     }
+    return response
