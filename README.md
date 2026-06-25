@@ -224,6 +224,52 @@ Tutte le release: https://github.com/ZXerniXZ/Drop/releases
 
 ---
 
+## Resilienza sulla Raspberry Pi
+
+Drop è progettato per ripartire automaticamente dopo **blackout** o **caduta Wi‑Fi**.
+
+### Servizi con avvio automatico
+
+| Servizio | Ruolo | Avvio al boot |
+|----------|--------|---------------|
+| `docker` | Container backend | `enabled` |
+| `cloudflared` | Tunnel Cloudflare | `enabled` + `Restart=always` |
+| `drop-backend.service` | `docker compose up -d` | `enabled` |
+| `drop-healthcheck.timer` | Controllo ogni 3 min | `enabled` |
+| `actions.runner.*` | CI/CD GitHub | `enabled` |
+
+### Installazione (una tantum sulla Pi)
+
+```bash
+cd ~/Drop
+git pull
+sudo backend/scripts/install-raspberry-services.sh
+```
+
+Lo script:
+- registra `drop-backend.service` (avvia il backend dopo Docker e rete)
+- attiva un timer che verifica ogni 3 minuti backend e tunnel
+- imposta `Restart=always` su `cloudflared`
+
+### Verifica manuale
+
+```bash
+systemctl status drop-backend.service cloudflared drop-healthcheck.timer
+docker compose -f ~/Drop/backend/docker-compose.yml ps
+curl -I http://localhost:8083/docs
+curl -I https://api.drop-prj.xyz/docs
+```
+
+### Test reboot
+
+```bash
+sudo reboot
+# dopo ~2 minuti, da un altro dispositivo:
+curl -I https://api.drop-prj.xyz/docs
+```
+
+---
+
 ## Convenzioni Git
 
 - **Branch**: `feature/nome`, `bugfix/nome`, `chore/nome` — mai commit diretti su `main`.
