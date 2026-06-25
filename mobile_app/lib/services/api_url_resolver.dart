@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../config/api_config.dart';
 
-const String physicalDeviceBackendHost = 'http://192.168.1.100:8080';
+const String physicalDeviceBackendHost = 'http://192.168.1.35:8083';
 
 class ApiUrlResolver {
   ApiUrlResolver._();
