@@ -88,8 +88,21 @@ def _strip_json_fence(content: str) -> str:
     text = content.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
-        text = re.sub(r"\s*```$", "", text.strip())
-    return text
+        text = re.sub(r"\s*```[\s\S]*$", "", text.strip())
+    return text.strip()
+
+
+def _load_first_json_object(content: str) -> dict[str, Any]:
+    text = _strip_json_fence(content)
+    start = text.find("{")
+    if start == -1:
+        raise ValueError("LLM response missing JSON object")
+
+    decoder = json.JSONDecoder()
+    data, _end = decoder.raw_decode(text, start)
+    if not isinstance(data, dict):
+        raise ValueError("LLM response JSON root must be an object")
+    return data
 
 
 def _as_string_list(value: Any) -> list[str]:
@@ -156,7 +169,7 @@ def _speaker_view_to_formatted(speaker_view: list[dict[str, str]]) -> str:
 def _parse_llm_json(
     content: str, allowed_tags: list[str] | None = None
 ) -> dict[str, Any]:
-    data = json.loads(_strip_json_fence(content))
+    data = _load_first_json_object(content)
 
     title = str(data.get("title", "")).strip()
     summary = str(data.get("summary", "")).strip()
