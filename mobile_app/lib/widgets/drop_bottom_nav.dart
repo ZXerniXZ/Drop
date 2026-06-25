@@ -11,14 +11,14 @@ class DropBottomNav extends StatelessWidget {
     required this.onTabChanged,
     required this.onRecordTap,
     required this.isRecording,
-    required this.isBusy,
+    required this.amplitudeLevel,
   });
 
   final DropNavTab activeTab;
   final ValueChanged<DropNavTab> onTabChanged;
   final VoidCallback onRecordTap;
   final bool isRecording;
-  final bool isBusy;
+  final double amplitudeLevel;
 
   @override
   Widget build(BuildContext context) {
@@ -44,7 +44,7 @@ class DropBottomNav extends StatelessWidget {
             offset: const Offset(0, -20),
             child: _RecordButton(
               isRecording: isRecording,
-              isBusy: isBusy,
+              amplitudeLevel: amplitudeLevel,
               onTap: onRecordTap,
             ),
           ),
@@ -117,12 +117,12 @@ class _NavItem extends StatelessWidget {
 class _RecordButton extends StatefulWidget {
   const _RecordButton({
     required this.isRecording,
-    required this.isBusy,
+    required this.amplitudeLevel,
     required this.onTap,
   });
 
   final bool isRecording;
-  final bool isBusy;
+  final double amplitudeLevel;
   final VoidCallback onTap;
 
   @override
@@ -131,12 +131,12 @@ class _RecordButton extends StatefulWidget {
 
 class _RecordButtonState extends State<_RecordButton>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse;
+  late final AnimationController _idlePulse;
 
   @override
   void initState() {
     super.initState();
-    _pulse = AnimationController(
+    _idlePulse = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     )..repeat(reverse: true);
@@ -144,20 +144,22 @@ class _RecordButtonState extends State<_RecordButton>
 
   @override
   void dispose() {
-    _pulse.dispose();
+    _idlePulse.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final disabled = widget.isBusy && !widget.isRecording;
+    final amp = widget.amplitudeLevel.clamp(0.0, 1.0);
+    final outerScale = widget.isRecording ? 1.0 + amp * 0.35 : 1.0;
+    final innerSize = widget.isRecording ? 16.0 + amp * 20 : 16.0;
+    final glowOpacity = widget.isRecording ? 0.15 + amp * 0.45 : 0.0;
 
     return GestureDetector(
-      onTap: disabled ? null : widget.onTap,
-      child: AnimatedOpacity(
-        opacity: disabled ? 0.4 : 1,
-        duration: const Duration(milliseconds: 200),
+      onTap: widget.onTap,
+      child: Transform.scale(
+        scale: outerScale,
         child: Container(
           width: 56,
           height: 56,
@@ -165,7 +167,9 @@ class _RecordButtonState extends State<_RecordButton>
             shape: BoxShape.circle,
             color: isDark ? DropColors.darkSurface : DropColors.lightSurface,
             border: Border.all(
-              color: DropColors.border(context),
+              color: widget.isRecording
+                  ? DropColors.recordRed.withValues(alpha: 0.4 + amp * 0.6)
+                  : DropColors.border(context),
               width: 2,
             ),
             boxShadow: [
@@ -174,17 +178,28 @@ class _RecordButtonState extends State<_RecordButton>
                 blurRadius: 12,
                 offset: const Offset(0, 4),
               ),
+              if (widget.isRecording)
+                BoxShadow(
+                  color: DropColors.recordRed.withValues(alpha: glowOpacity),
+                  blurRadius: 16 + amp * 12,
+                  spreadRadius: amp * 4,
+                ),
             ],
           ),
           child: Center(
             child: widget.isRecording
-                ? const Icon(
-                    Icons.stop_rounded,
-                    color: DropColors.recordRed,
-                    size: 28,
+                ? AnimatedContainer(
+                    duration: const Duration(milliseconds: 80),
+                    width: innerSize,
+                    height: innerSize,
+                    decoration: BoxDecoration(
+                      color: DropColors.recordRed,
+                      shape: BoxShape.circle,
+                      borderRadius: BorderRadius.circular(4 + amp * 8),
+                    ),
                   )
                 : FadeTransition(
-                    opacity: Tween(begin: 0.6, end: 1.0).animate(_pulse),
+                    opacity: Tween(begin: 0.6, end: 1.0).animate(_idlePulse),
                     child: Container(
                       width: 16,
                       height: 16,

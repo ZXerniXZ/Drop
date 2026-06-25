@@ -1,3 +1,37 @@
+enum NoteTag {
+  meeting('Meeting'),
+  lezione('Lezione'),
+  diario('Diario');
+
+  const NoteTag(this.label);
+  final String label;
+
+  static NoteTag fromString(String? value) {
+    return NoteTag.values.firstWhere(
+      (t) => t.label.toLowerCase() == value?.toLowerCase(),
+      orElse: () => NoteTag.diario,
+    );
+  }
+}
+
+enum NoteAnalysisStatus {
+  processing('processing'),
+  ready('ready'),
+  failed('failed');
+
+  const NoteAnalysisStatus(this.dbValue);
+  final String dbValue;
+
+  static NoteAnalysisStatus fromString(String? value) {
+    return NoteAnalysisStatus.values.firstWhere(
+      (s) => s.dbValue == value,
+      orElse: () => NoteAnalysisStatus.ready,
+    );
+  }
+
+  bool get isProcessing => this == NoteAnalysisStatus.processing;
+}
+
 class AudioNote {
   const AudioNote({
     required this.id,
@@ -8,6 +42,9 @@ class AudioNote {
     required this.summary,
     this.rawTranscription = '',
     this.durationSeconds = 0,
+    this.isNew = false,
+    this.tag = NoteTag.diario,
+    this.analysisStatus = NoteAnalysisStatus.ready,
   });
 
   final String id;
@@ -18,6 +55,14 @@ class AudioNote {
   final String summary;
   final String rawTranscription;
   final int durationSeconds;
+  final bool isNew;
+  final NoteTag tag;
+  final NoteAnalysisStatus analysisStatus;
+
+  bool get isProcessing => analysisStatus.isProcessing;
+
+  String get searchableText =>
+      '$title $transcription $summary $rawTranscription'.toLowerCase();
 
   static String titleFromDateTime(DateTime dateTime) {
     final day = dateTime.day.toString().padLeft(2, '0');
@@ -27,7 +72,6 @@ class AudioNote {
     return 'Nota $day/$month $hour:$minute';
   }
 
-  /// Es. `15m 56s`, `45s`, `1h 2m 3s`
   static String formatDurationLabel(int totalSeconds) {
     if (totalSeconds <= 0) return '';
 
@@ -46,6 +90,34 @@ class AudioNote {
 
   String get durationLabel => formatDurationLabel(durationSeconds);
 
+  AudioNote copyWith({
+    String? id,
+    String? title,
+    DateTime? dateTime,
+    String? audioPath,
+    String? transcription,
+    String? summary,
+    String? rawTranscription,
+    int? durationSeconds,
+    bool? isNew,
+    NoteTag? tag,
+    NoteAnalysisStatus? analysisStatus,
+  }) {
+    return AudioNote(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      dateTime: dateTime ?? this.dateTime,
+      audioPath: audioPath ?? this.audioPath,
+      transcription: transcription ?? this.transcription,
+      summary: summary ?? this.summary,
+      rawTranscription: rawTranscription ?? this.rawTranscription,
+      durationSeconds: durationSeconds ?? this.durationSeconds,
+      isNew: isNew ?? this.isNew,
+      tag: tag ?? this.tag,
+      analysisStatus: analysisStatus ?? this.analysisStatus,
+    );
+  }
+
   factory AudioNote.fromMap(Map<String, Object?> map) {
     return AudioNote(
       id: map['id'] as String,
@@ -56,6 +128,10 @@ class AudioNote {
       summary: map['summary'] as String? ?? '',
       rawTranscription: map['raw_transcription'] as String? ?? '',
       durationSeconds: map['duration_seconds'] as int? ?? 0,
+      isNew: (map['is_new'] as int? ?? 0) == 1,
+      tag: NoteTag.fromString(map['tag'] as String?),
+      analysisStatus:
+          NoteAnalysisStatus.fromString(map['analysis_status'] as String?),
     );
   }
 
@@ -69,6 +145,9 @@ class AudioNote {
       'summary': summary,
       'raw_transcription': rawTranscription,
       'duration_seconds': durationSeconds,
+      'is_new': isNew ? 1 : 0,
+      'tag': tag.label,
+      'analysis_status': analysisStatus.dbValue,
     };
   }
 }
