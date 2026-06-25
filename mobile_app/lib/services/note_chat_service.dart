@@ -1,0 +1,170 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:http/http.dart' as http;
+
+import '../models/audio_note.dart';
+import '../models/chat_stream_event.dart';
+import '../models/note_chat_message.dart';
+import 'api_url_resolver.dart';
+import 'app_preferences_service.dart';
+import 'local_database_service.dart';
+
+class NoteChatService {
+  NoteChatService._();
+
+  static final NoteChatService instance = NoteChatService._();
+  static final _random = Random();
+
+  String _newId() =>
+      '${DateTime.now().microsecondsSinceEpoch}_${_random.nextInt(1 << 32)}';
+
+  Map<String, dynamic> _noteContextFromAudioNote(AudioNote note) {
+    final sd = note.structuredData;
+    return {
+      'title': note.title,
+      'tag': note.tag.label,
+      'date_time': note.dateTime.toIso8601String(),
+      'raw_transcription': note.rawTranscription,
+      'formatted_transcription': note.transcription,
+      'summary': note.summary,
+      'highlights': sd.highlights,
+      'key_data': {
+        'location': sd.location,
+        'participants': sd.participants,
+        'tags': note.tag.label,
+      },
+      'speaker_view': sd.speakerView
+          .map((b) => {
+                'speaker': b.speaker,
+                'text': b.text,
+                if (b.time != null) 'time': b.time,
+              })
+          .toList(),
+    };
+  }
+
+  Future<NoteChatMessage> saveUserMessage({
+    required String noteId,
+    required String content,
+  }) async {
+    final message = NoteChatMessage(
+      id: _newId(),
+      noteId: noteId,
+      role: 'user',
+      content: content,
+      createdAt: DateTime.now(),
+    );
+    await LocalDatabaseService.instance.saveChatMessage(message);
+    return message;
+  }
+
+  Future<NoteChatMessage> saveAssistantMessage({
+    required String noteId,
+    required String content,
+    String? reasoning,
+  }) async {
+    final message = NoteChatMessage(
+      id: _newId(),
+      noteId: noteId,
+      role: 'assistant',
+      content: content,
+      reasoning: reasoning?.trim().isEmpty == true ? null : reasoning?.trim(),
+      createdAt: DateTime.now(),
+    );
+    await LocalDatabaseService.instance.saveChatMessage(message);
+    return message;
+  }
+
+  Stream<ChatStreamEvent> sendMessageStream({
+    required AudioNote note,
+    required String message,
+  }) async* {
+    final prefs = await AppPreferencesService.instance.loadAiPreferences();
+    final history = await LocalDatabaseService.instance.getChatMessages(note.id);
+    var historyForApi = history;
+    if (historyForApi.isNotEmpty &&
+        historyForApi.last.isUser &&
+        historyForApi.last.content == message) {
+      historyForApi = historyForApi.sublist(0, historyForApi.length - 1);
+    }
+    final historyPayload = historyForApi
+        .map((m) => {'role': m.role, 'content': m.content})
+        .toList();
+
+    final url = await ApiUrlResolver.resolveEndpoint('/chat-note/stream');
+    final body = jsonEncode({
+      'message': message,
+      'history': historyPayload,
+      'ai_model': prefs.model.openRouterId,
+      'note_context': _noteContextFromAudioNote(note),
+    });
+
+    final client = http.Client();
+    try {
+      final request = http.Request('POST', Uri.parse(url))
+        ..headers['Content-Type'] = 'application/json'
+        ..body = body;
+
+      final response = await client.send(request);
+
+      if (response.statusCode != 200) {
+        final errorBody = await response.stream.bytesToString();
+        yield ChatStreamError(
+          'Errore server (${response.statusCode}): $errorBody',
+        );
+        return;
+      }
+
+      var buffer = '';
+      await for (final chunk in response.stream.transform(utf8.decoder)) {
+        buffer += chunk;
+        while (true) {
+          final lineEnd = buffer.indexOf('\n');
+          if (lineEnd == -1) break;
+
+          var line = buffer.substring(0, lineEnd).trim();
+          buffer = buffer.substring(lineEnd + 1);
+
+          if (line.isEmpty || line.startsWith(':')) continue;
+          if (!line.startsWith('data:')) continue;
+
+          final dataStr = line.substring(5).trim();
+          if (dataStr == '[DONE]') return;
+
+          Map<String, dynamic> parsed;
+          try {
+            parsed = jsonDecode(dataStr) as Map<String, dynamic>;
+          } catch (_) {
+            continue;
+          }
+
+          final type = parsed['type'] as String?;
+          switch (type) {
+            case 'reasoning':
+              final delta = parsed['delta'] as String? ?? '';
+              if (delta.isNotEmpty) yield ChatReasoningDelta(delta);
+            case 'content':
+              final delta = parsed['delta'] as String? ?? '';
+              if (delta.isNotEmpty) yield ChatContentDelta(delta);
+            case 'done':
+              yield ChatStreamDone(
+                content: parsed['content'] as String? ?? '',
+                reasoning: parsed['reasoning'] as String?,
+              );
+            case 'error':
+              yield ChatStreamError(
+                parsed['message'] as String? ?? 'Errore sconosciuto',
+              );
+              return;
+          }
+        }
+      }
+    } catch (e) {
+      yield ChatStreamError('Errore di rete: $e');
+    } finally {
+      client.close();
+    }
+  }
+}

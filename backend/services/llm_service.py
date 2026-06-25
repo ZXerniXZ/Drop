@@ -12,12 +12,18 @@ APP_REFERER = "https://github.com/ZXerniXZ/Drop"
 APP_TITLE = "Drop"
 
 MODEL_ALIASES: dict[str, str] = {
+    "gemini_35_flash": "google/gemini-3.5-flash",
+    "gemini35flash": "google/gemini-3.5-flash",
+    "gemini 3.5 flash": "google/gemini-3.5-flash",
+    "google/gemini-3.5-flash": "google/gemini-3.5-flash",
     "gemini_flash": "google/gemini-2.5-flash",
     "geminiflash": "google/gemini-2.5-flash",
-    "gemini 1.5 flash": "google/gemini-2.5-flash",
+    "gemini 2.5 flash": "google/gemini-2.5-flash",
+    "google/gemini-2.5-flash": "google/gemini-2.5-flash",
     "gemini_pro": "google/gemini-2.5-pro",
     "geminipro": "google/gemini-2.5-pro",
-    "gemini 1.5 pro": "google/gemini-2.5-pro",
+    "gemini 2.5 pro": "google/gemini-2.5-pro",
+    "google/gemini-2.5-pro": "google/gemini-2.5-pro",
 }
 
 SYSTEM_PROMPT = """Sei l'assistente di un'app di note vocali stile Plaud Note.
@@ -47,8 +53,11 @@ Regole:
 def resolve_llm_model(ai_model: str | None) -> str:
     if not ai_model:
         return OPENROUTER_LLM_MODEL
-    normalized = ai_model.strip().lower().replace("-", "_").replace(" ", "_")
-    label_normalized = ai_model.strip().lower()
+    stripped = ai_model.strip()
+    if "/" in stripped:
+        return stripped
+    normalized = stripped.lower().replace("-", "_").replace(" ", "_")
+    label_normalized = stripped.lower()
     return MODEL_ALIASES.get(normalized) or MODEL_ALIASES.get(
         label_normalized, OPENROUTER_LLM_MODEL
     )

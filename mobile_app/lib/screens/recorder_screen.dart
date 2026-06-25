@@ -2,14 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
-import '../config/api_config.dart';
+import '../services/api_url_resolver.dart';
 import '../models/audio_note.dart';
 import '../models/note_structured_data.dart';
 import '../services/app_preferences_service.dart';
@@ -24,8 +23,6 @@ import '../widgets/drop_bottom_nav.dart';
 import '../widgets/note_list_card.dart';
 import 'note_detail_screen.dart';
 import 'my_data_screen.dart';
-
-const String physicalDeviceBackendHost = 'http://192.168.1.100:8080';
 
 class RecorderScreen extends StatefulWidget {
   const RecorderScreen({
@@ -168,30 +165,8 @@ class _RecorderScreenState extends State<RecorderScreen> {
     }
   }
 
-  Future<bool> _isAndroidEmulator() async {
-    if (!Platform.isAndroid) return false;
-    try {
-      final cpuinfo = await File('/proc/cpuinfo').readAsString();
-      return cpuinfo.contains('goldfish') ||
-          cpuinfo.contains('ranchu') ||
-          cpuinfo.contains('qemu');
-    } catch (_) {
-      return false;
-    }
-  }
-
   Future<String> _resolveUploadUrl() async {
-    if (kReleaseMode) return productionUploadUrl;
-    if (Platform.isAndroid) {
-      if (await _isAndroidEmulator()) {
-        return 'http://10.0.2.2:8080/upload-audio';
-      }
-      return '$physicalDeviceBackendHost/upload-audio';
-    }
-    if (Platform.isIOS) {
-      return '$physicalDeviceBackendHost/upload-audio';
-    }
-    return 'http://localhost:8080/upload-audio';
+    return ApiUrlResolver.resolveEndpoint('/upload-audio');
   }
 
   Future<void> _processUpload({
@@ -204,7 +179,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
       final prefs = await AppPreferencesService.instance.loadAiPreferences();
       final request = http.MultipartRequest('POST', Uri.parse(url));
       request.files.add(await http.MultipartFile.fromPath('file', filePath));
-      request.fields['ai_model'] = prefs.model.name;
+      request.fields['ai_model'] = prefs.model.openRouterId;
       request.fields['language'] = prefs.transcriptionLanguage.name;
       if (prefs.customPrompt.trim().isNotEmpty) {
         request.fields['custom_prompt'] = prefs.customPrompt.trim();

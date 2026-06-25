@@ -6,6 +6,7 @@ import '../models/audio_note.dart';
 import '../models/note_structured_data.dart';
 import '../theme/drop_theme.dart';
 import '../widgets/note_detail/ask_ai_bar.dart';
+import '../widgets/note_detail/note_chat_sheet.dart';
 import '../widgets/note_detail/note_audio_player.dart';
 
 enum _DetailMode { sources, notes }
@@ -77,11 +78,20 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
 
   void _onAskAiSend() {
     final text = _askAiController.text.trim();
-    if (text.isEmpty) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Ask AI — funzione in arrivo')),
-    );
+    if (text.isEmpty) {
+      _openChatSheet();
+      return;
+    }
+    _openChatSheet(initialMessage: text);
     _askAiController.clear();
+  }
+
+  void _openChatSheet({String? initialMessage}) {
+    showNoteChatSheet(
+      context,
+      note: widget.note,
+      initialMessage: initialMessage,
+    );
   }
 
   @override
@@ -103,6 +113,11 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
             AskAiBar(
               controller: _askAiController,
               onSend: _onAskAiSend,
+              onOpenChat: () => _openChatSheet(),
+              enabled: !widget.note.isProcessing,
+              hintText: widget.note.isProcessing
+                  ? 'ANALISI IN CORSO...'
+                  : 'ASK DROP ABOUT THIS NOTE...',
             ),
           ],
         ),

@@ -4,8 +4,10 @@ from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 import config  # noqa: F401
+from services.chat_service import NoteChatRequest, stream_note_chat
 from services.llm_service import process_transcript
 from services.openrouter_service import transcribe_audio
 
@@ -71,3 +73,16 @@ async def upload_audio(
         "speaker_view": processed["speaker_view"],
     }
     return response
+
+
+@app.post("/chat-note/stream")
+async def chat_note_stream(request: NoteChatRequest):
+    return StreamingResponse(
+        stream_note_chat(request),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
