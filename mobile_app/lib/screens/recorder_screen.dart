@@ -12,6 +12,7 @@ import '../services/api_url_resolver.dart';
 import '../models/audio_note.dart';
 import '../models/note_structured_data.dart';
 import '../models/note_tags_config.dart';
+import '../models/record_orb_style.dart';
 import '../services/app_preferences_service.dart';
 import '../models/note_filters.dart';
 import '../services/audio_recording_config.dart';
@@ -20,14 +21,18 @@ import '../services/local_database_service.dart';
 import '../services/openrouter_client.dart';
 import '../services/recording_foreground_service.dart';
 import '../services/supabase_auth_service.dart';
+import '../theme/drop_motion.dart';
 import '../theme/drop_theme.dart';
 import '../utils/note_filter_utils.dart';
 import '../widgets/note_filter_bar.dart';
 import '../widgets/drop_bottom_nav.dart';
 import '../widgets/drop_logo.dart';
 import '../widgets/note_list_card.dart';
+import '../widgets/recording_banner.dart';
+import '../widgets/staggered_entrance.dart';
 import 'note_detail_screen.dart';
 import 'my_data_screen.dart';
+import 'record_orb_preview_screen.dart';
 
 class RecorderScreen extends StatefulWidget {
   const RecorderScreen({
@@ -56,6 +61,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
   List<String> _availableTags = NoteTagsConfig.defaultTags;
   Duration _elapsed = Duration.zero;
   double _amplitudeLevel = 0;
+  RecordOrbStyle _orbStyle = RecordOrbStyle.radialBars;
   Timer? _timer;
   StreamSubscription<Amplitude>? _amplitudeSub;
   String? _currentPath;
@@ -68,6 +74,20 @@ class _RecorderScreenState extends State<RecorderScreen> {
     FlutterForegroundTask.addTaskDataCallback(_onForegroundTaskData);
     _loadNotes();
     _loadTags();
+    _loadOrbStyle();
+  }
+
+  Future<void> _loadOrbStyle() async {
+    final style = await AppPreferencesService.instance.loadRecordOrbStyle();
+    if (!mounted) return;
+    setState(() => _orbStyle = style);
+  }
+
+  Future<void> _openOrbPreview() async {
+    await Navigator.of(context).push(
+      DropPageRoute<void>(page: const RecordOrbPreviewScreen()),
+    );
+    await _loadOrbStyle();
   }
 
   Future<void> _loadTags() async {
@@ -519,8 +539,8 @@ class _RecorderScreenState extends State<RecorderScreen> {
 
     if (!mounted) return;
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => NoteDetailScreen(
+      DropPageRoute<void>(
+        page: NoteDetailScreen(
           note: note,
           onDelete: () => _deleteNote(note),
           onRetry: note.isFailed ? () => _retryAnalysis(note) : null,
@@ -537,16 +557,38 @@ class _RecorderScreenState extends State<RecorderScreen> {
           children: [
             _buildHeader(context),
             if (_activeTab == DropNavTab.file) _buildFiltersSection(context),
-            Expanded(child: _buildBody(context)),
+            if (_isRecording && _activeTab == DropNavTab.file)
+              RecordingBanner(
+                elapsedLabel: _formatDuration(_elapsed),
+                onStop: _stopRecording,
+              ),
+            Expanded(
+              child: AnimatedSwitcher(
+                duration: DropMotion.medium,
+                switchInCurve: DropMotion.enter,
+                switchOutCurve: DropMotion.exit,
+                transitionBuilder: (child, animation) =>
+                    DropSwitcherTransition(animation: animation, child: child),
+                child: KeyedSubtree(
+                  key: ValueKey(_activeTab),
+                  child: _buildBody(context),
+                ),
+              ),
+            ),
             DropBottomNav(
               activeTab: _activeTab,
               onTabChanged: (tab) {
                 setState(() => _activeTab = tab);
-                if (tab == DropNavTab.file) _loadTags();
+                if (tab == DropNavTab.file) {
+                  _loadTags();
+                  _loadOrbStyle();
+                }
               },
               onRecordTap: _toggleRecording,
               isRecording: _isRecording,
               amplitudeLevel: _amplitudeLevel,
+              orbStyle: _orbStyle,
+              onOrbPreview: _openOrbPreview,
             ),
           ],
         ),
@@ -559,29 +601,47 @@ class _RecorderScreenState extends State<RecorderScreen> {
       padding: const EdgeInsets.fromLTRB(24, 8, 16, 4),
       child: Row(
         children: [
-          if (_activeTab == DropNavTab.file)
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const DropLogo(height: 26),
-                const SizedBox(width: 10),
-                Text(
-                  'Drop',
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: -0.3,
-                      ),
-                ),
-              ],
-            )
-          else
-            Text(
-              'Impostazioni',
-              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: -0.3,
-                  ),
+          AnimatedSwitcher(
+            duration: DropMotion.medium,
+            switchInCurve: DropMotion.enter,
+            switchOutCurve: DropMotion.exit,
+            transitionBuilder: (child, animation) => FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0, 0.15),
+                  end: Offset.zero,
+                ).animate(animation),
+                child: child,
+              ),
             ),
+            child: _activeTab == DropNavTab.file
+                ? Row(
+                    key: const ValueKey('file-header'),
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const DropLogo(height: 26),
+                      const SizedBox(width: 10),
+                      Text(
+                        'Drop',
+                        style:
+                            Theme.of(context).textTheme.headlineMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: -0.3,
+                                ),
+                      ),
+                    ],
+                  )
+                : Text(
+                    'Impostazioni',
+                    key: const ValueKey('settings-header'),
+                    style:
+                        Theme.of(context).textTheme.headlineMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: -0.3,
+                            ),
+                  ),
+          ),
           const Spacer(),
           if (_activeTab == DropNavTab.file)
             Text(
@@ -667,12 +727,15 @@ class _RecorderScreenState extends State<RecorderScreen> {
       separatorBuilder: (_, _) => const SizedBox(height: 16),
       itemBuilder: (context, index) {
         final note = _filteredNotes[index];
-        return NoteListCard(
-          note: note,
-          dateLabel: _formatNoteDate(note.dateTime),
-          onTap: note.isProcessing ? null : () => _openNoteDetail(note),
-          onDelete: () => _deleteNote(note),
-          onRetry: note.isFailed ? () => _retryAnalysis(note) : null,
+        return StaggeredEntrance(
+          index: index,
+          child: NoteListCard(
+            note: note,
+            dateLabel: _formatNoteDate(note.dateTime),
+            onTap: note.isProcessing ? null : () => _openNoteDetail(note),
+            onDelete: () => _deleteNote(note),
+            onRetry: note.isFailed ? () => _retryAnalysis(note) : null,
+          ),
         );
       },
     );

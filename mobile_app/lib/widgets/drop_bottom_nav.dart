@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../models/record_orb_style.dart';
+import '../theme/drop_motion.dart';
 import '../theme/drop_theme.dart';
+import 'siri_record_orb.dart';
 
 enum DropNavTab { file, settings }
 
@@ -12,6 +16,8 @@ class DropBottomNav extends StatelessWidget {
     required this.onRecordTap,
     required this.isRecording,
     required this.amplitudeLevel,
+    this.orbStyle = RecordOrbStyle.radialBars,
+    this.onOrbPreview,
   });
 
   final DropNavTab activeTab;
@@ -19,6 +25,8 @@ class DropBottomNav extends StatelessWidget {
   final VoidCallback onRecordTap;
   final bool isRecording;
   final double amplitudeLevel;
+  final RecordOrbStyle orbStyle;
+  final VoidCallback? onOrbPreview;
 
   @override
   Widget build(BuildContext context) {
@@ -45,7 +53,9 @@ class DropBottomNav extends StatelessWidget {
             child: _RecordButton(
               isRecording: isRecording,
               amplitudeLevel: amplitudeLevel,
+              orbStyle: orbStyle,
               onTap: onRecordTap,
+              onLongPress: onOrbPreview,
             ),
           ),
           _NavItem(
@@ -60,7 +70,7 @@ class DropBottomNav extends StatelessWidget {
   }
 }
 
-class _NavItem extends StatelessWidget {
+class _NavItem extends StatefulWidget {
   const _NavItem({
     required this.icon,
     required this.label,
@@ -74,40 +84,64 @@ class _NavItem extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
+  State<_NavItem> createState() => _NavItemState();
+}
+
+class _NavItemState extends State<_NavItem> {
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
-    final color = isActive
+    final color = widget.isActive
         ? Theme.of(context).colorScheme.onSurface
         : DropColors.muted(context);
 
     return GestureDetector(
-      onTap: onTap,
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) => setState(() => _pressed = false),
+      onTapCancel: () => setState(() => _pressed = false),
+      onTap: widget.onTap,
       behavior: HitTestBehavior.opaque,
-      child: SizedBox(
-        width: 64,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 20, color: color),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: color,
-                    fontSize: 10,
-                    fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
-                  ),
-            ),
-            const SizedBox(height: 6),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: isActive ? 20 : 0,
-              height: 2,
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.onSurface,
-                borderRadius: BorderRadius.circular(1),
+      child: AnimatedScale(
+        scale: _pressed ? 0.92 : 1.0,
+        duration: DropMotion.fast,
+        curve: DropMotion.standard,
+        child: SizedBox(
+          width: 64,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AnimatedScale(
+                scale: widget.isActive ? 1.05 : 1.0,
+                duration: DropMotion.medium,
+                curve: DropMotion.spring,
+                child: Icon(widget.icon, size: 20, color: color),
               ),
-            ),
-          ],
+              const SizedBox(height: 4),
+              AnimatedDefaultTextStyle(
+                duration: DropMotion.medium,
+                curve: DropMotion.standard,
+                style: Theme.of(context).textTheme.labelSmall!.copyWith(
+                      color: color,
+                      fontSize: 10,
+                      fontWeight:
+                          widget.isActive ? FontWeight.w600 : FontWeight.w500,
+                    ),
+                child: Text(widget.label),
+              ),
+              const SizedBox(height: 6),
+              AnimatedContainer(
+                duration: DropMotion.medium,
+                curve: DropMotion.standard,
+                width: widget.isActive ? 20 : 0,
+                height: 2,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.onSurface,
+                  borderRadius: BorderRadius.circular(1),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -118,98 +152,137 @@ class _RecordButton extends StatefulWidget {
   const _RecordButton({
     required this.isRecording,
     required this.amplitudeLevel,
+    required this.orbStyle,
     required this.onTap,
+    this.onLongPress,
   });
 
   final bool isRecording;
   final double amplitudeLevel;
+  final RecordOrbStyle orbStyle;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   @override
   State<_RecordButton> createState() => _RecordButtonState();
 }
 
 class _RecordButtonState extends State<_RecordButton>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _idlePulse;
+    with TickerProviderStateMixin {
+  late final AnimationController _breathController;
+  late final AnimationController _waveController;
+  late final Animation<double> _breath;
+  double _displayAmp = 0;
+  bool _pressed = false;
 
   @override
   void initState() {
     super.initState();
-    _idlePulse = AnimationController(
+    _breathController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1200),
+      duration: const Duration(milliseconds: 2200),
     )..repeat(reverse: true);
+    _waveController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    );
+    _breath = CurvedAnimation(
+      parent: _breathController,
+      curve: Curves.easeInOutSine,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _RecordButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isRecording && !oldWidget.isRecording) {
+      _waveController.repeat();
+    } else if (!widget.isRecording && oldWidget.isRecording) {
+      _waveController.stop();
+      _waveController.reset();
+      _displayAmp = 0;
+    }
   }
 
   @override
   void dispose() {
-    _idlePulse.dispose();
+    _breathController.dispose();
+    _waveController.dispose();
     super.dispose();
+  }
+
+  void _handleTap() {
+    HapticFeedback.mediumImpact();
+    widget.onTap();
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final amp = widget.amplitudeLevel.clamp(0.0, 1.0);
-    final outerScale = widget.isRecording ? 1.0 + amp * 0.35 : 1.0;
-    final innerSize = widget.isRecording ? 16.0 + amp * 20 : 16.0;
-    final glowOpacity = widget.isRecording ? 0.15 + amp * 0.45 : 0.0;
 
     return GestureDetector(
-      onTap: widget.onTap,
-      child: Transform.scale(
-        scale: outerScale,
-        child: Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: isDark ? DropColors.darkSurface : DropColors.lightSurface,
-            border: Border.all(
-              color: widget.isRecording
-                  ? DropColors.recordRed.withValues(alpha: 0.4 + amp * 0.6)
-                  : DropColors.border(context),
-              width: 2,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.08),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-              if (widget.isRecording)
-                BoxShadow(
-                  color: DropColors.recordRed.withValues(alpha: glowOpacity),
-                  blurRadius: 16 + amp * 12,
-                  spreadRadius: amp * 4,
-                ),
-            ],
-          ),
-          child: Center(
-            child: widget.isRecording
-                ? AnimatedContainer(
-                    duration: const Duration(milliseconds: 80),
-                    width: innerSize,
-                    height: innerSize,
-                    decoration: BoxDecoration(
-                      color: DropColors.recordRed,
-                      shape: BoxShape.circle,
-                      borderRadius: BorderRadius.circular(4 + amp * 8),
-                    ),
-                  )
-                : FadeTransition(
-                    opacity: Tween(begin: 0.6, end: 1.0).animate(_idlePulse),
-                    child: Container(
-                      width: 16,
-                      height: 16,
-                      decoration: const BoxDecoration(
-                        color: DropColors.recordRed,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) => setState(() => _pressed = false),
+      onTapCancel: () => setState(() => _pressed = false),
+      onTap: _handleTap,
+      onLongPress: widget.onLongPress,
+      child: AnimatedScale(
+        scale: _pressed ? 0.94 : 1.0,
+        duration: DropMotion.fast,
+        curve: DropMotion.standard,
+        child: AnimatedBuilder(
+          animation: Listenable.merge([_breathController, _waveController]),
+          builder: (context, child) {
+            _displayAmp += (widget.amplitudeLevel - _displayAmp) * 0.22;
+
+            final recordingScale =
+                widget.isRecording ? 1.0 + _displayAmp * 0.06 : 1.0;
+            final glowOpacity = widget.isRecording
+                ? 0.12 + _displayAmp * 0.4
+                : 0.06 + _breath.value * 0.08;
+
+            return Transform.scale(
+              scale: recordingScale,
+              child: Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isDark ? DropColors.darkSurface : DropColors.lightSurface,
+                  border: Border.all(
+                    color: widget.isRecording
+                        ? DropColors.recordRed
+                            .withValues(alpha: 0.35 + _displayAmp * 0.5)
+                        : DropColors.border(context),
+                    width: widget.isRecording ? 1.5 : 2,
                   ),
-          ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.1),
+                      blurRadius: 14,
+                      offset: const Offset(0, 4),
+                    ),
+                    BoxShadow(
+                      color: DropColors.recordRed.withValues(alpha: glowOpacity),
+                      blurRadius: widget.isRecording ? 22 + _displayAmp * 16 : 14,
+                      spreadRadius: widget.isRecording ? _displayAmp * 3 : 0,
+                    ),
+                  ],
+                ),
+                child: Center(
+                  child: SiriRecordOrb(
+                    size: 52,
+                    style: widget.orbStyle,
+                    isRecording: widget.isRecording,
+                    amplitude: _displayAmp,
+                    phase: _waveController.value,
+                    breath: _breath.value,
+                    isDark: isDark,
+                  ),
+                ),
+              ),
+            );
+          },
         ),
       ),
     );

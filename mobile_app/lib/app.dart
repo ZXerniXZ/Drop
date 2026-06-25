@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/login_screen.dart';
 import 'screens/recorder_screen.dart';
 import 'services/supabase_auth_service.dart';
+import 'theme/drop_motion.dart';
 import 'theme/drop_theme.dart';
 
 class DropApp extends StatefulWidget {
@@ -29,6 +30,8 @@ class _DropAppState extends State<DropApp> {
       title: 'Drop',
       debugShowCheckedModeBanner: false,
       themeMode: _themeMode,
+      themeAnimationDuration: DropMotion.slow,
+      themeAnimationCurve: DropMotion.standard,
       theme: DropTheme.light(),
       darkTheme: DropTheme.dark(),
       home: StreamBuilder<AuthState>(

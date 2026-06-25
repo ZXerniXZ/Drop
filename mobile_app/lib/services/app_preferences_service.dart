@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/ai_preferences.dart';
 import '../models/note_tags_config.dart';
+import '../models/record_orb_style.dart';
 
 class AppPreferencesService {
   AppPreferencesService._();
@@ -16,6 +17,7 @@ class AppPreferencesService {
   static const _promptKey = 'custom_prompt';
   static const _tagsKey = 'note_tags';
   static const _openRouterApiKey = 'openrouter_api_key';
+  static const _recordOrbStyleKey = 'dev_record_orb_style';
 
   static const _secureStorage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
@@ -111,5 +113,15 @@ class AppPreferencesService {
       _tagsKey,
       jsonEncode(unique.isEmpty ? NoteTagsConfig.defaultTags : unique),
     );
+  }
+
+  Future<RecordOrbStyle> loadRecordOrbStyle() async {
+    await init();
+    return RecordOrbStyle.fromId(_store.getString(_recordOrbStyleKey));
+  }
+
+  Future<void> saveRecordOrbStyle(RecordOrbStyle style) async {
+    await init();
+    await _store.setString(_recordOrbStyleKey, style.id);
   }
 }

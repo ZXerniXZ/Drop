@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/note_filters.dart';
+import '../theme/drop_motion.dart';
 import '../theme/drop_theme.dart';
 
 class FileSearchFilters extends StatelessWidget {
@@ -100,54 +101,82 @@ class FileSearchFilters extends StatelessWidget {
               ),
             ],
           ),
-          if (filtersVisible) ...[
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: _FilterDropdown<String?>(
-                    label: 'TIPO NOTA',
-                    value: filters.tagFilter,
-                    items: [
-                      const _DropdownItem<String?>(null, 'Tutti'),
-                      ...availableTags.map(
-                        (t) => _DropdownItem<String?>(t, t),
-                      ),
-                    ],
-                    onChanged: onTagChanged,
-                  ),
+          AnimatedSize(
+            duration: DropMotion.medium,
+            curve: DropMotion.standard,
+            alignment: Alignment.topCenter,
+            child: ClipRect(
+              child: AnimatedSwitcher(
+                duration: DropMotion.medium,
+                switchInCurve: DropMotion.enter,
+                switchOutCurve: DropMotion.exit,
+                transitionBuilder: (child, animation) => SizeTransition(
+                  sizeFactor: animation,
+                  alignment: Alignment.topCenter,
+                  child: FadeTransition(opacity: animation, child: child),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _FilterDropdown<DurationFilter>(
-                    label: 'DURATA',
-                    value: filters.durationFilter,
-                    items: const [
-                      _DropdownItem(DurationFilter.all, 'Tutte'),
-                      _DropdownItem(DurationFilter.short, '< 5 min'),
-                      _DropdownItem(DurationFilter.medium, '5–15 min'),
-                      _DropdownItem(DurationFilter.long, '> 15 min'),
-                    ],
-                    onChanged: (v) => onDurationChanged(v ?? DurationFilter.all),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _FilterDropdown<StatusFilter>(
-                    label: 'STATO',
-                    value: filters.statusFilter,
-                    items: const [
-                      _DropdownItem(StatusFilter.all, 'Tutti'),
-                      _DropdownItem(StatusFilter.processing, 'In elaborazione'),
-                      _DropdownItem(StatusFilter.ready, 'Pronte'),
-                      _DropdownItem(StatusFilter.failed, 'Fallite'),
-                    ],
-                    onChanged: (v) => onStatusChanged(v ?? StatusFilter.all),
-                  ),
-                ),
-              ],
+                child: filtersVisible
+                    ? Padding(
+                        key: const ValueKey('filters'),
+                        padding: const EdgeInsets.only(top: 14),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: _FilterDropdown<String?>(
+                                label: 'TIPO NOTA',
+                                value: filters.tagFilter,
+                                items: [
+                                  const _DropdownItem<String?>(null, 'Tutti'),
+                                  ...availableTags.map(
+                                    (t) => _DropdownItem<String?>(t, t),
+                                  ),
+                                ],
+                                onChanged: onTagChanged,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: _FilterDropdown<DurationFilter>(
+                                label: 'DURATA',
+                                value: filters.durationFilter,
+                                items: const [
+                                  _DropdownItem(DurationFilter.all, 'Tutte'),
+                                  _DropdownItem(DurationFilter.short, '< 5 min'),
+                                  _DropdownItem(
+                                    DurationFilter.medium,
+                                    '5–15 min',
+                                  ),
+                                  _DropdownItem(DurationFilter.long, '> 15 min'),
+                                ],
+                                onChanged: (v) =>
+                                    onDurationChanged(v ?? DurationFilter.all),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: _FilterDropdown<StatusFilter>(
+                                label: 'STATO',
+                                value: filters.statusFilter,
+                                items: const [
+                                  _DropdownItem(StatusFilter.all, 'Tutti'),
+                                  _DropdownItem(
+                                    StatusFilter.processing,
+                                    'In elaborazione',
+                                  ),
+                                  _DropdownItem(StatusFilter.ready, 'Pronte'),
+                                  _DropdownItem(StatusFilter.failed, 'Fallite'),
+                                ],
+                                onChanged: (v) =>
+                                    onStatusChanged(v ?? StatusFilter.all),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : const SizedBox.shrink(key: ValueKey('no-filters')),
+              ),
             ),
-          ],
+          ),
         ],
       ),
     );

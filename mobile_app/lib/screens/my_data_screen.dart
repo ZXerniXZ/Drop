@@ -10,7 +10,9 @@ import '../services/openrouter_client.dart';
 import '../services/server_health_service.dart';
 import '../services/supabase_auth_service.dart';
 import '../services/usage_stats_service.dart';
+import '../theme/drop_motion.dart';
 import '../theme/drop_theme.dart';
+import 'record_orb_preview_screen.dart';
 
 class MyDataScreen extends StatefulWidget {
   const MyDataScreen({super.key});
@@ -262,6 +264,24 @@ class _MyDataScreenState extends State<MyDataScreen> {
               _NoteTagsSection(
                 config: _noteTags,
                 onChanged: _saveNoteTags,
+              ),
+            ],
+          ),
+          const SizedBox(height: 28),
+          const _SettingsSectionLabel('Tasto record'),
+          const SizedBox(height: 8),
+          _SettingsGroup(
+            children: [
+              _SettingsActionRow(
+                label: 'Scegli animazione',
+                icon: Icons.animation_outlined,
+                onTap: () async {
+                  await Navigator.of(context).push(
+                    DropPageRoute<void>(
+                      page: const RecordOrbPreviewScreen(),
+                    ),
+                  );
+                },
               ),
             ],
           ),

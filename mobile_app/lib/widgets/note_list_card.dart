@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/audio_note.dart';
+import '../theme/drop_motion.dart';
 import '../theme/drop_theme.dart';
 
 class NoteListCard extends StatelessWidget {
@@ -37,7 +38,7 @@ class NoteListCard extends StatelessWidget {
     return Material(
       color: isDark ? DropColors.darkSurface : DropColors.lightSurface,
       borderRadius: BorderRadius.circular(16),
-      child: InkWell(
+      child: _PressableCard(
         onTap: onTap,
         onLongPress: isProcessing ? null : () => _confirmDelete(context),
         borderRadius: BorderRadius.circular(16),
@@ -198,5 +199,46 @@ class NoteListCard extends StatelessWidget {
     );
 
     if (confirmed == true) onDelete();
+  }
+}
+
+class _PressableCard extends StatefulWidget {
+  const _PressableCard({
+    required this.child,
+    required this.borderRadius,
+    this.onTap,
+    this.onLongPress,
+  });
+
+  final Widget child;
+  final BorderRadius borderRadius;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+
+  @override
+  State<_PressableCard> createState() => _PressableCardState();
+}
+
+class _PressableCardState extends State<_PressableCard> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedScale(
+      scale: _pressed ? 0.985 : 1.0,
+      duration: DropMotion.fast,
+      curve: DropMotion.standard,
+      child: InkWell(
+        onTapDown: widget.onTap != null ? (_) => setState(() => _pressed = true) : null,
+        onTapUp: widget.onTap != null ? (_) => setState(() => _pressed = false) : null,
+        onTapCancel: () => setState(() => _pressed = false),
+        onTap: widget.onTap,
+        onLongPress: widget.onLongPress,
+        borderRadius: widget.borderRadius,
+        splashColor: DropColors.recordRed.withValues(alpha: 0.06),
+        highlightColor: DropColors.recordRed.withValues(alpha: 0.03),
+        child: widget.child,
+      ),
+    );
   }
 }
