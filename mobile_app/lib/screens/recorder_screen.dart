@@ -4,12 +4,15 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
 import '../models/audio_note.dart';
+import '../services/audio_recording_config.dart';
 import '../services/local_database_service.dart';
+import '../services/recording_foreground_service.dart';
 import '../theme/drop_theme.dart';
 import '../widgets/drop_bottom_nav.dart';
 import '../widgets/note_list_card.dart';
@@ -51,14 +54,22 @@ class _RecorderScreenState extends State<RecorderScreen> {
   @override
   void initState() {
     super.initState();
+    FlutterForegroundTask.addTaskDataCallback(_onForegroundTaskData);
     _loadNotes();
   }
 
   @override
   void dispose() {
+    FlutterForegroundTask.removeTaskDataCallback(_onForegroundTaskData);
     _timer?.cancel();
     _recorder.dispose();
     super.dispose();
+  }
+
+  void _onForegroundTaskData(Object data) {
+    if (data is Map && data['action'] == 'stop' && _isRecording) {
+      _stopRecording();
+    }
   }
 
   Future<void> _loadNotes() async {
@@ -90,6 +101,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
     required String id,
     required String audioPath,
     required DateTime createdAt,
+    required int durationSeconds,
   }) {
     final raw = data['raw_transcription'] as String? ??
         data['transcription'] as String? ??
@@ -105,6 +117,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
       transcription: formatted,
       summary: summary,
       rawTranscription: raw,
+      durationSeconds: durationSeconds,
     );
   }
 
@@ -115,7 +128,10 @@ class _RecorderScreenState extends State<RecorderScreen> {
       if (!await recordingsDir.exists()) {
         await recordingsDir.create(recursive: true);
       }
-      final dest = '${recordingsDir.path}/$noteId.m4a';
+      final dest = AudioRecordingConfig.buildPersistedPath(
+        recordingsDir.path,
+        noteId,
+      );
       await File(tempPath).copy(dest);
       return dest;
     } catch (_) {
@@ -151,7 +167,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
     return 'http://localhost:8080/upload-audio';
   }
 
-  Future<void> _uploadAudio(String filePath) async {
+  Future<void> _uploadAudio(String filePath, {required int durationSeconds}) async {
     setState(() => _isUploading = true);
 
     try {
@@ -177,6 +193,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
           id: noteId,
           audioPath: persistedPath,
           createdAt: createdAt,
+          durationSeconds: durationSeconds,
         );
 
         await LocalDatabaseService.instance.saveNote(note);
@@ -251,17 +268,27 @@ class _RecorderScreenState extends State<RecorderScreen> {
     }
 
     final dir = await getTemporaryDirectory();
-    final path =
-        '${dir.path}/recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    final path = AudioRecordingConfig.buildTempPath(dir.path);
 
     await _recorder.start(
-      const RecordConfig(
-        encoder: AudioEncoder.aacLc,
-        bitRate: 128000,
-        sampleRate: 44100,
-      ),
+      AudioRecordingConfig.recordConfig,
       path: path,
     );
+
+    final elapsedLabel = _formatDuration(Duration.zero);
+    final serviceStarted = await RecordingForegroundService.start(
+      elapsedLabel: elapsedLabel,
+    );
+    if (!serviceStarted && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Impossibile avviare il servizio in primo piano. '
+            'La registrazione potrebbe interrompersi in background.',
+          ),
+        ),
+      );
+    }
 
     setState(() {
       _isRecording = true;
@@ -271,13 +298,17 @@ class _RecorderScreenState extends State<RecorderScreen> {
 
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       setState(() => _elapsed += const Duration(seconds: 1));
+      RecordingForegroundService.updateElapsed(_formatDuration(_elapsed));
     });
   }
 
   Future<void> _stopRecording() async {
     _timer?.cancel();
     _timer = null;
+    final recordedDuration = _elapsed;
     final path = await _recorder.stop();
+
+    await RecordingForegroundService.stop();
 
     setState(() {
       _isRecording = false;
@@ -288,7 +319,10 @@ class _RecorderScreenState extends State<RecorderScreen> {
     _currentPath = null;
 
     if (savedPath == null || !mounted) return;
-    await _uploadAudio(savedPath);
+    await _uploadAudio(
+      savedPath,
+      durationSeconds: recordedDuration.inSeconds,
+    );
   }
 
   void _openNoteDetail(AudioNote note) {

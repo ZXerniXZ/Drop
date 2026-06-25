@@ -81,6 +81,22 @@ class NoteListCard extends StatelessWidget {
                           fontWeight: FontWeight.w500,
                         ),
                   ),
+                  if (note.durationLabel.isNotEmpty) ...[
+                    const SizedBox(width: 12),
+                    Icon(
+                      Icons.schedule_outlined,
+                      size: 13,
+                      color: DropColors.muted(context),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      note.durationLabel,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            letterSpacing: 0.4,
+                            fontWeight: FontWeight.w500,
+                          ),
+                    ),
+                  ],
                   if (note.summary.isNotEmpty) ...[
                     const Spacer(),
                     Container(
