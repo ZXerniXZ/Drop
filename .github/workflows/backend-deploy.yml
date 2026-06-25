@@ -1,0 +1,15 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rebuild and restart Docker containers
+        run: cd backend && docker compose down && docker compose up -d --build
