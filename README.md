@@ -121,6 +121,88 @@ Configurare l'URL del backend nell'app (es. `http://<IP-PC>:8000` in sviluppo, U
 
 ---
 
+## Setup del CI/CD (Self-Hosted Runner)
+
+Il deploy del backend in produzione è automatizzato tramite **GitHub Actions** con un runner self-hosted installato direttamente sulla Raspberry Pi. Ogni push su `main` esegue il workflow `.github/workflows/backend-deploy.yml`, che ricostruisce e riavvia i container Docker.
+
+### 1. Registrare la Raspberry su GitHub
+
+1. Apri la repository su GitHub → **Settings** → **Actions** → **Runners**.
+2. Clicca **New self-hosted runner**.
+3. Seleziona **Linux** e architettura **ARM64** (Raspberry Pi 64-bit).
+4. Segui i comandi mostrati da GitHub (eseguili **sulla Raspberry**):
+
+```bash
+# Esempio — usa i comandi esatti mostrati da GitHub per la tua repo
+mkdir -p ~/actions-runner && cd ~/actions-runner
+curl -o actions-runner-linux-arm64-2.XXX.X.tar.gz -L https://github.com/actions/runner/releases/download/vX.X.X/actions-runner-linux-arm64-2.XXX.X.tar.gz
+tar xzf ./actions-runner-linux-arm64-*.tar.gz
+./config.sh --url https://github.com/ZXerniXZ/Drop --token <TOKEN_TEMPORANEO>
+```
+
+Durante `config.sh`:
+- **Runner name**: `raspberry-drop` (o un nome a piacere)
+- **Labels**: lascia `self-hosted`, `Linux`, `ARM64`
+- **Work folder**: accetta il default (`_work`)
+
+### 2. Installare il runner come servizio di sistema
+
+Sempre nella cartella `~/actions-runner` sulla Raspberry:
+
+```bash
+sudo ./svc.sh install
+sudo ./svc.sh start
+sudo ./svc.sh status
+```
+
+Il runner resterà attivo in background e si riavvierà automaticamente al boot.
+
+Comandi utili:
+
+```bash
+sudo ./svc.sh stop      # ferma il runner
+sudo ./svc.sh status    # verifica stato
+journalctl -u actions.runner.* -f   # log in tempo reale
+```
+
+### 3. Prerequisiti sulla Raspberry (una tantum)
+
+Il workflow esegue `docker compose` nella cartella `backend/` della workspace del runner. I file **non** versionati devono essere collegati dalla produzione:
+
+```bash
+# Dopo la prima esecuzione del workflow (o preventivamente)
+WORKSPACE=~/actions-runner/_work/Drop/Drop/backend
+mkdir -p "$WORKSPACE"
+ln -sf ~/Drop/backend/.env "$WORKSPACE/.env"
+ln -sf ~/Drop/backend/storage "$WORKSPACE/storage"
+ln -sf ~/Drop/backend/data "$WORKSPACE/data"
+```
+
+Assicurati che:
+- Docker e Docker Compose siano installati
+- `~/Drop/backend/.env` contenga le chiavi di produzione (`OPENROUTER_API_KEY`, `BACKEND_PORT`, ecc.)
+- l'utente del runner (`ares`) sia nel gruppo `docker`
+
+### 4. Come funziona il deploy
+
+| Evento | Azione automatica |
+|--------|-------------------|
+| Push / merge su `main` | GitHub Actions avvia il job |
+| Runner `self-hosted` | Esegue il job sulla Raspberry |
+| `actions/checkout@v4` | Scarica l'ultimo codice |
+| `docker compose up -d --build` | Ricostruisce e riavvia il backend |
+
+Verifica manuale dopo un deploy:
+
+```bash
+cd ~/actions-runner/_work/Drop/Drop/backend
+docker compose ps
+docker compose logs --tail=30 backend
+curl -I http://localhost:8083/docs
+```
+
+---
+
 ## Convenzioni Git
 
 - **Branch**: `feature/nome`, `bugfix/nome`, `chore/nome` — mai commit diretti su `main`.
