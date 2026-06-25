@@ -1,10 +1,9 @@
 import 'dart:io';
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-import 'package:drop/main.dart';
+import 'package:drop/app.dart';
 import 'package:drop/services/local_database_service.dart';
 
 void main() {
@@ -23,9 +22,8 @@ void main() {
     await tester.pumpWidget(const DropApp());
     await tester.pump();
 
-    expect(find.text('Drop'), findsOneWidget);
-    expect(find.text('Tocca per registrare'), findsOneWidget);
-    expect(find.text('Trascrizioni'), findsOneWidget);
-    expect(find.byIcon(Icons.mic), findsOneWidget);
+    expect(find.text('DROP'), findsOneWidget);
+    expect(find.text('FILE'), findsOneWidget);
+    expect(find.text('NOTE (0)'), findsOneWidget);
   });
 }
