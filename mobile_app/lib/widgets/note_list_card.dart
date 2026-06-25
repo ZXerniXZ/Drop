@@ -169,7 +169,7 @@ class NoteListCard extends StatelessWidget {
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
-                        note.tag.label.toUpperCase(),
+                        note.tag.toUpperCase(),
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                               fontSize: 9,
                             ),

@@ -28,6 +28,6 @@ void main() {
 
     expect(find.text('DROP'), findsOneWidget);
     expect(find.text('FILE'), findsOneWidget);
-    expect(find.text('NOTE (0)'), findsOneWidget);
+    expect(find.text('0 note'), findsOneWidget);
   });
 }

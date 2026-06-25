@@ -11,6 +11,7 @@ import 'package:record/record.dart';
 import '../services/api_url_resolver.dart';
 import '../models/audio_note.dart';
 import '../models/note_structured_data.dart';
+import '../models/note_tags_config.dart';
 import '../services/app_preferences_service.dart';
 import '../models/note_filters.dart';
 import '../services/audio_recording_config.dart';
@@ -47,7 +48,8 @@ class _RecorderScreenState extends State<RecorderScreen> {
   DropNavTab _activeTab = DropNavTab.file;
   bool _isRecording = false;
   bool _isLoadingNotes = true;
-  bool _searchExpanded = false;
+  bool _filtersVisible = false;
+  List<String> _availableTags = NoteTagsConfig.defaultTags;
   Duration _elapsed = Duration.zero;
   double _amplitudeLevel = 0;
   Timer? _timer;
@@ -61,6 +63,13 @@ class _RecorderScreenState extends State<RecorderScreen> {
     super.initState();
     FlutterForegroundTask.addTaskDataCallback(_onForegroundTaskData);
     _loadNotes();
+    _loadTags();
+  }
+
+  Future<void> _loadTags() async {
+    final config = await AppPreferencesService.instance.loadNoteTags();
+    if (!mounted) return;
+    setState(() => _availableTags = config.tags);
   }
 
   @override
@@ -125,18 +134,20 @@ class _RecorderScreenState extends State<RecorderScreen> {
         '';
     final formatted = data['formatted_transcription'] as String? ?? raw;
     final summary = data['summary'] as String? ?? '';
+    final title = (data['title'] as String?)?.trim();
     final structured = NoteStructuredData.fromResponse(data);
 
-    NoteTag tag = placeholder.tag;
+    var tag = placeholder.tag;
     final keyData = data['key_data'];
     if (keyData is Map<String, dynamic>) {
       final tagLabel = keyData['tags'] as String?;
       if (tagLabel != null && tagLabel.isNotEmpty) {
-        tag = NoteTag.fromString(tagLabel);
+        tag = NoteTagsConfig.normalizeTag(tagLabel, allowed: _availableTags);
       }
     }
 
     return placeholder.copyWith(
+      title: (title != null && title.isNotEmpty) ? title : placeholder.title,
       audioPath: audioPath,
       transcription: formatted,
       summary: summary,
@@ -177,10 +188,12 @@ class _RecorderScreenState extends State<RecorderScreen> {
     try {
       final url = await _resolveUploadUrl();
       final prefs = await AppPreferencesService.instance.loadAiPreferences();
+      final tagsConfig = await AppPreferencesService.instance.loadNoteTags();
       final request = http.MultipartRequest('POST', Uri.parse(url));
       request.files.add(await http.MultipartFile.fromPath('file', filePath));
       request.fields['ai_model'] = prefs.model.openRouterId;
       request.fields['language'] = prefs.transcriptionLanguage.name;
+      request.fields['available_tags'] = jsonEncode(tagsConfig.tags);
       if (prefs.customPrompt.trim().isNotEmpty) {
         request.fields['custom_prompt'] = prefs.customPrompt.trim();
       }
@@ -329,7 +342,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
       summary: '',
       durationSeconds: recordedDuration.inSeconds,
       isNew: true,
-      tag: NoteTag.diario,
+      tag: 'Memo',
       analysisStatus: NoteAnalysisStatus.processing,
     );
 
@@ -377,12 +390,14 @@ class _RecorderScreenState extends State<RecorderScreen> {
         child: Column(
           children: [
             _buildHeader(context),
-            _buildSubHeader(context),
             if (_activeTab == DropNavTab.file) _buildFiltersSection(context),
             Expanded(child: _buildBody(context)),
             DropBottomNav(
               activeTab: _activeTab,
-              onTabChanged: (tab) => setState(() => _activeTab = tab),
+              onTabChanged: (tab) {
+                setState(() => _activeTab = tab);
+                if (tab == DropNavTab.file) _loadTags();
+              },
               onRecordTap: _toggleRecording,
               isRecording: _isRecording,
               amplitudeLevel: _amplitudeLevel,
@@ -395,106 +410,66 @@ class _RecorderScreenState extends State<RecorderScreen> {
 
   Widget _buildHeader(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 8, 16, 8),
+      padding: const EdgeInsets.fromLTRB(24, 8, 16, 4),
       child: Row(
         children: [
-          if (!_searchExpanded)
+          Text(
+            _activeTab == DropNavTab.file ? 'DROP' : 'IMPOSTAZIONI',
+            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.5,
+                ),
+          ),
+          const Spacer(),
+          if (_activeTab == DropNavTab.file)
             Text(
-              'DROP',
-              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 1.5,
+              '${_filteredNotes.length} note',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    fontSize: 11,
+                    color: DropColors.muted(context),
                   ),
             ),
-          if (_searchExpanded) const SizedBox.shrink(),
-          const Spacer(),
-          NoteSearchBar(
-            controller: _searchController,
-            isExpanded: _searchExpanded,
-            onToggle: () => setState(() => _searchExpanded = !_searchExpanded),
-            onChanged: (q) => setState(
-              () => _filters = _filters.copyWith(searchQuery: q),
+          const SizedBox(width: 8),
+          IconButton(
+            onPressed: widget.onToggleTheme,
+            style: IconButton.styleFrom(
+              side: BorderSide(color: DropColors.border(context)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            icon: Icon(
+              widget.isDarkMode
+                  ? Icons.wb_sunny_outlined
+                  : Icons.dark_mode_outlined,
+              size: 18,
             ),
           ),
-          if (!_searchExpanded) ...[
-            const SizedBox(width: 8),
-            IconButton(
-              onPressed: widget.onToggleTheme,
-              style: IconButton.styleFrom(
-                side: BorderSide(color: DropColors.border(context)),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              icon: Icon(
-                widget.isDarkMode
-                    ? Icons.wb_sunny_outlined
-                    : Icons.dark_mode_outlined,
-                size: 18,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSubHeader(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: DropColors.border(context))),
-      ),
-      child: Row(
-        children: [
-          if (_activeTab == DropNavTab.file) ...[
-            Icon(
-              Icons.tune,
-              size: 18,
-              color: _filters.hasActiveFilters
-                  ? DropColors.recordRed
-                  : DropColors.muted(context),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              _filters.hasActiveFilters ? 'FILTRO ATTIVO' : 'TUTTE LE NOTE',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: _filters.hasActiveFilters
-                        ? DropColors.recordRed
-                        : null,
-                  ),
-            ),
-            const Spacer(),
-            Text(
-              'NOTE (${_filteredNotes.length})',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    fontSize: 12,
-                    letterSpacing: 1.4,
-                  ),
-            ),
-          ] else
-            Text(
-              'IMPOSTAZIONI',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    fontSize: 12,
-                    letterSpacing: 1.4,
-                  ),
-            ),
         ],
       ),
     );
   }
 
   Widget _buildFiltersSection(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
-      child: NoteFilterBar(
-        filters: _filters,
-        onDateChanged: (f) =>
-            setState(() => _filters = _filters.copyWith(dateFilter: f)),
-        onTagChanged: (f) =>
-            setState(() => _filters = _filters.copyWith(tagFilter: f)),
+    return FileSearchFilters(
+      searchController: _searchController,
+      filters: _filters,
+      availableTags: _availableTags,
+      filtersVisible: _filtersVisible,
+      onSearchChanged: (q) =>
+          setState(() => _filters = _filters.copyWith(searchQuery: q)),
+      onToggleFilters: () =>
+          setState(() => _filtersVisible = !_filtersVisible),
+      onTagChanged: (tag) => setState(
+        () => _filters = _filters.copyWith(
+          tagFilter: tag,
+          clearTagFilter: tag == null,
+        ),
       ),
+      onDurationChanged: (d) =>
+          setState(() => _filters = _filters.copyWith(durationFilter: d)),
+      onStatusChanged: (s) =>
+          setState(() => _filters = _filters.copyWith(statusFilter: s)),
     );
   }
 

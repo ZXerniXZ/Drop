@@ -5,6 +5,7 @@ import '../data/note_detail_mock_data.dart';
 import '../models/audio_note.dart';
 import '../models/note_structured_data.dart';
 import '../theme/drop_theme.dart';
+import '../widgets/drop_markdown.dart';
 import '../widgets/note_detail/ask_ai_bar.dart';
 import '../widgets/note_detail/note_chat_sheet.dart';
 import '../widgets/note_detail/note_audio_player.dart';
@@ -201,7 +202,7 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
           _NotesSubTab.keyData => _KeyDataTab(
               location: widget.note.structuredData.location,
               participants: widget.note.structuredData.participants,
-              tag: widget.note.tag.label,
+              tag: widget.note.tag,
             ),
         },
       ],
@@ -491,8 +492,9 @@ class _SummaryTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final paragraphs =
-        NoteDetailMockData.summaryParagraphs(note.summary.isNotEmpty ? note.summary : null);
+    final summaryText = note.summary.isNotEmpty
+        ? note.summary
+        : NoteDetailMockData.summaryParagraphs(null).join('\n\n');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -522,25 +524,11 @@ class _SummaryTab extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 16),
-        ...paragraphs.map(
-          (p) => Padding(
-            padding: const EdgeInsets.only(bottom: 14),
-            child: Text(
-              p,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontSize: 14,
-                    color: Theme.of(context)
-                        .colorScheme
-                        .onSurface
-                        .withValues(alpha: 0.85),
-                  ),
-            ),
-          ),
-        ),
+        DropMarkdown(data: summaryText),
         const SizedBox(height: 8),
         OutlinedButton.icon(
           onPressed: () async {
-            await Clipboard.setData(ClipboardData(text: paragraphs.join('\n\n')));
+            await Clipboard.setData(ClipboardData(text: summaryText));
             if (!context.mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('Riepilogo copiato negli appunti')),

@@ -26,28 +26,50 @@ MODEL_ALIASES: dict[str, str] = {
     "google/gemini-2.5-pro": "google/gemini-2.5-pro",
 }
 
-SYSTEM_PROMPT = """Sei l'assistente di un'app di note vocali stile Plaud Note.
+SYSTEM_PROMPT_TEMPLATE = """Sei l'assistente di un'app di note vocali stile Plaud Note.
 Analizza la trascrizione grezza e restituisci SOLO un oggetto JSON valido con questo schema esatto:
 
-{
+{{
+  "title": "titolo breve e descrittivo della nota (max 60 caratteri, in italiano)",
   "summary": "stringa Markdown con sezioni ## Overview, ## Key Decisions e altre sezioni utili",
   "highlights": ["action item o punto chiave 1", "punto 2"],
-  "key_data": {
+  "key_data": {{
     "location": "luogo dedotto o stringa vuota",
     "participants": ["nome o Speaker 0", "Speaker 1"],
-    "tags": "Meeting | Lezione | Diario"
-  },
+    "tags": "UNO dalla lista consentita"
+  }},
   "speaker_view": [
-    {"speaker": "Speaker 0", "text": "testo pronunciato", "time": "00:00"}
+    {{"speaker": "Speaker 0", "text": "testo pronunciato", "time": "00:00"}}
   ],
   "formatted_transcript": "trascrizione formattata con etichette speaker per lettura lineare"
-}
+}}
+
+Tag consentiti (scegline esattamente UNO per key_data.tags): {tag_list}
 
 Regole:
+- title: sintetico, riflette il contenuto principale, senza data/ora.
 - highlights: 2-8 elementi concreti e actionable quando possibile.
 - speaker_view: separa logicamente il dialogo per speaker; se monologo usa Speaker 0.
-- key_data.tags: scegli UNA tra Meeting, Lezione, Diario in base al contenuto.
+- key_data.tags: DEVE essere uno dei tag consentiti sopra.
 - Rispondi SOLO con JSON, senza markdown fence o testo extra."""
+
+DEFAULT_TAGS = [
+    "Meeting",
+    "Lezione",
+    "Diario",
+    "Lavoro",
+    "Intervista",
+    "Brainstorm",
+    "Memo",
+    "Chiamata",
+]
+
+
+def _build_system_prompt(available_tags: list[str] | None = None) -> str:
+    tags = [t.strip() for t in (available_tags or DEFAULT_TAGS) if t.strip()]
+    if not tags:
+        tags = DEFAULT_TAGS
+    return SYSTEM_PROMPT_TEMPLATE.format(tag_list=" | ".join(tags))
 
 
 def resolve_llm_model(ai_model: str | None) -> str:
@@ -96,22 +118,28 @@ def _normalize_speaker_view(value: Any) -> list[dict[str, str]]:
     return blocks
 
 
-def _normalize_key_data(value: Any) -> dict[str, Any]:
+def _normalize_key_data(
+    value: Any, allowed_tags: list[str] | None = None
+) -> dict[str, Any]:
     if not isinstance(value, dict):
-        return {"location": "", "participants": [], "tags": "Diario"}
+        default_tag = (allowed_tags or DEFAULT_TAGS)[0]
+        return {"location": "", "participants": [], "tags": default_tag}
 
     participants = value.get("participants", [])
     if not isinstance(participants, list):
         participants = []
 
-    tags = str(value.get("tags", "Diario")).strip() or "Diario"
-    if tags not in {"Meeting", "Lezione", "Diario"}:
-        tags = "Diario"
+    pool = [t.strip() for t in (allowed_tags or DEFAULT_TAGS) if t.strip()]
+    if not pool:
+        pool = DEFAULT_TAGS
+
+    tags = str(value.get("tags", pool[0])).strip() or pool[0]
+    matched = next((t for t in pool if t.lower() == tags.lower()), pool[0])
 
     return {
         "location": str(value.get("location", "")).strip(),
         "participants": [str(p).strip() for p in participants if str(p).strip()],
-        "tags": tags,
+        "tags": matched,
     }
 
 
@@ -126,12 +154,15 @@ def _speaker_view_to_formatted(speaker_view: list[dict[str, str]]) -> str:
     return "\n\n".join(parts)
 
 
-def _parse_llm_json(content: str) -> dict[str, Any]:
+def _parse_llm_json(
+    content: str, allowed_tags: list[str] | None = None
+) -> dict[str, Any]:
     data = json.loads(_strip_json_fence(content))
 
+    title = str(data.get("title", "")).strip()
     summary = str(data.get("summary", "")).strip()
     highlights = _as_string_list(data.get("highlights"))
-    key_data = _normalize_key_data(data.get("key_data"))
+    key_data = _normalize_key_data(data.get("key_data"), allowed_tags)
     speaker_view = _normalize_speaker_view(data.get("speaker_view"))
 
     formatted = str(data.get("formatted_transcript", "")).strip()
@@ -141,7 +172,11 @@ def _parse_llm_json(content: str) -> dict[str, Any]:
     if not summary:
         raise ValueError("LLM response missing summary")
 
+    if not title:
+        title = "Nota vocale"
+
     return {
+        "title": title[:80],
         "summary": summary,
         "highlights": highlights,
         "key_data": key_data,
@@ -165,12 +200,14 @@ async def process_transcript(
     model: str | None = None,
     custom_prompt: str | None = None,
     language: str | None = None,
+    available_tags: list[str] | None = None,
 ) -> dict[str, Any]:
     if not OPENROUTER_API_KEY:
         raise ValueError("OPENROUTER_API_KEY is not configured")
 
     resolved_model = resolve_llm_model(model)
     user_prompt = _build_user_prompt(transcript, custom_prompt)
+    tags_pool = [t.strip() for t in (available_tags or DEFAULT_TAGS) if t.strip()]
 
     if language and language.strip().lower() not in {"automatic", "automatico", ""}:
         user_prompt = (
@@ -187,7 +224,7 @@ async def process_transcript(
     payload = {
         "model": resolved_model,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": _build_system_prompt(tags_pool)},
             {"role": "user", "content": user_prompt},
         ],
         "response_format": {"type": "json_object"},
@@ -210,4 +247,4 @@ async def process_transcript(
     except (KeyError, IndexError) as exc:
         raise ValueError("Unexpected OpenRouter chat response format") from exc
 
-    return _parse_llm_json(content)
+    return _parse_llm_json(content, tags_pool)

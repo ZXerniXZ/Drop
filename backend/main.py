@@ -1,3 +1,4 @@
+import json
 import uuid
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,7 @@ async def upload_audio(
     ai_model: str | None = Form(default=None),
     language: str | None = Form(default=None),
     custom_prompt: str | None = Form(default=None),
+    available_tags: str | None = Form(default=None),
 ):
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -49,12 +51,22 @@ async def upload_audio(
             detail=f"Transcription failed: {exc}",
         ) from exc
 
+    tags_list: list[str] | None = None
+    if available_tags and available_tags.strip():
+        try:
+            parsed = json.loads(available_tags)
+            if isinstance(parsed, list):
+                tags_list = [str(t).strip() for t in parsed if str(t).strip()]
+        except json.JSONDecodeError:
+            tags_list = None
+
     try:
         processed = await process_transcript(
             transcription,
             model=ai_model,
             custom_prompt=custom_prompt,
             language=language,
+            available_tags=tags_list,
         )
     except Exception as exc:
         raise HTTPException(
@@ -66,6 +78,7 @@ async def upload_audio(
         "success": True,
         "filename": saved_name,
         "raw_transcription": transcription,
+        "title": processed["title"],
         "formatted_transcription": processed["formatted_transcript"],
         "summary": processed["summary"],
         "highlights": processed["highlights"],

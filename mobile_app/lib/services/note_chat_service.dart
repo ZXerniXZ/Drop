@@ -24,7 +24,7 @@ class NoteChatService {
     final sd = note.structuredData;
     return {
       'title': note.title,
-      'tag': note.tag.label,
+      'tag': note.tag,
       'date_time': note.dateTime.toIso8601String(),
       'raw_transcription': note.rawTranscription,
       'formatted_transcription': note.transcription,
@@ -33,7 +33,7 @@ class NoteChatService {
       'key_data': {
         'location': sd.location,
         'participants': sd.participants,
-        'tags': note.tag.label,
+        'tags': note.tag,
       },
       'speaker_view': sd.speakerView
           .map((b) => {

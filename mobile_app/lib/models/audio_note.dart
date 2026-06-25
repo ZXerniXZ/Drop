@@ -1,20 +1,5 @@
 import 'note_structured_data.dart';
-
-enum NoteTag {
-  meeting('Meeting'),
-  lezione('Lezione'),
-  diario('Diario');
-
-  const NoteTag(this.label);
-  final String label;
-
-  static NoteTag fromString(String? value) {
-    return NoteTag.values.firstWhere(
-      (t) => t.label.toLowerCase() == value?.toLowerCase(),
-      orElse: () => NoteTag.diario,
-    );
-  }
-}
+import 'note_tags_config.dart';
 
 enum NoteAnalysisStatus {
   processing('processing'),
@@ -45,7 +30,7 @@ class AudioNote {
     this.rawTranscription = '',
     this.durationSeconds = 0,
     this.isNew = false,
-    this.tag = NoteTag.diario,
+    this.tag = 'Memo',
     this.analysisStatus = NoteAnalysisStatus.ready,
     this.structuredData = const NoteStructuredData(),
   });
@@ -59,14 +44,14 @@ class AudioNote {
   final String rawTranscription;
   final int durationSeconds;
   final bool isNew;
-  final NoteTag tag;
+  final String tag;
   final NoteAnalysisStatus analysisStatus;
   final NoteStructuredData structuredData;
 
   bool get isProcessing => analysisStatus.isProcessing;
 
   String get searchableText =>
-      '$title $transcription $summary $rawTranscription'.toLowerCase();
+      '$title $tag $transcription $summary $rawTranscription'.toLowerCase();
 
   static String titleFromDateTime(DateTime dateTime) {
     final day = dateTime.day.toString().padLeft(2, '0');
@@ -104,7 +89,7 @@ class AudioNote {
     String? rawTranscription,
     int? durationSeconds,
     bool? isNew,
-    NoteTag? tag,
+    String? tag,
     NoteAnalysisStatus? analysisStatus,
     NoteStructuredData? structuredData,
   }) {
@@ -135,7 +120,7 @@ class AudioNote {
       rawTranscription: map['raw_transcription'] as String? ?? '',
       durationSeconds: map['duration_seconds'] as int? ?? 0,
       isNew: (map['is_new'] as int? ?? 0) == 1,
-      tag: NoteTag.fromString(map['tag'] as String?),
+      tag: NoteTagsConfig.normalizeTag(map['tag'] as String?),
       analysisStatus:
           NoteAnalysisStatus.fromString(map['analysis_status'] as String?),
       structuredData: NoteStructuredData.fromJsonString(
@@ -155,7 +140,7 @@ class AudioNote {
       'raw_transcription': rawTranscription,
       'duration_seconds': durationSeconds,
       'is_new': isNew ? 1 : 0,
-      'tag': tag.label,
+      'tag': tag,
       'analysis_status': analysisStatus.dbValue,
       'structured_json': structuredData.toJsonString(),
     };

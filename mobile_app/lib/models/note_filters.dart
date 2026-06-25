@@ -1,32 +1,39 @@
-enum DateFilter { all, today, week }
+enum DurationFilter { all, short, medium, long }
 
-enum TagFilter { all, meeting, lezione, diario }
+enum StatusFilter { all, processing, ready, failed }
 
 class NoteFilters {
   const NoteFilters({
-    this.dateFilter = DateFilter.all,
-    this.tagFilter = TagFilter.all,
+    this.tagFilter,
+    this.durationFilter = DurationFilter.all,
+    this.statusFilter = StatusFilter.all,
     this.searchQuery = '',
   });
 
-  final DateFilter dateFilter;
-  final TagFilter tagFilter;
+  /// null = tutti i tag
+  final String? tagFilter;
+  final DurationFilter durationFilter;
+  final StatusFilter statusFilter;
   final String searchQuery;
 
   NoteFilters copyWith({
-    DateFilter? dateFilter,
-    TagFilter? tagFilter,
+    String? tagFilter,
+    bool clearTagFilter = false,
+    DurationFilter? durationFilter,
+    StatusFilter? statusFilter,
     String? searchQuery,
   }) {
     return NoteFilters(
-      dateFilter: dateFilter ?? this.dateFilter,
-      tagFilter: tagFilter ?? this.tagFilter,
+      tagFilter: clearTagFilter ? null : (tagFilter ?? this.tagFilter),
+      durationFilter: durationFilter ?? this.durationFilter,
+      statusFilter: statusFilter ?? this.statusFilter,
       searchQuery: searchQuery ?? this.searchQuery,
     );
   }
 
   bool get hasActiveFilters =>
-      dateFilter != DateFilter.all ||
-      tagFilter != TagFilter.all ||
+      tagFilter != null ||
+      durationFilter != DurationFilter.all ||
+      statusFilter != StatusFilter.all ||
       searchQuery.trim().isNotEmpty;
 }

@@ -6,6 +6,7 @@ import '../../models/note_chat_message.dart';
 import '../../services/local_database_service.dart';
 import '../../services/note_chat_service.dart';
 import '../../theme/drop_theme.dart';
+import '../../widgets/drop_markdown.dart';
 import 'ask_ai_bar.dart';
 import 'reasoning_accordion.dart';
 
@@ -328,17 +329,15 @@ class _ChatBubble extends StatelessWidget {
                     ? null
                     : Border.all(color: DropColors.border(context)),
               ),
-              child: Text(
-                message.content,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontSize: 13,
-                      color: isUser
-                          ? Theme.of(context).colorScheme.surface
-                          : Theme.of(context)
-                              .colorScheme
-                              .onSurface
-                              .withValues(alpha: 0.9),
-                    ),
+              child: DropMarkdown(
+                data: message.content,
+                fontSize: 13,
+                textColor: isUser
+                    ? Theme.of(context).colorScheme.surface
+                    : Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withValues(alpha: 0.9),
               ),
             ),
           ],
@@ -392,12 +391,7 @@ class _StreamingBubble extends StatelessWidget {
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(color: DropColors.border(context)),
                 ),
-                child: Text(
-                  content,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontSize: 13,
-                      ),
-                ),
+                child: DropMarkdown(data: content, fontSize: 13),
               )
             else if (!isStreamingReasoning && reasoning.isEmpty)
               const Padding(

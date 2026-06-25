@@ -3,32 +3,38 @@ import '../models/note_filters.dart';
 
 List<AudioNote> applyNoteFilters(List<AudioNote> notes, NoteFilters filters) {
   final query = filters.searchQuery.trim().toLowerCase();
-  final now = DateTime.now();
-  final todayStart = DateTime(now.year, now.month, now.day);
-  final weekStart = todayStart.subtract(const Duration(days: 7));
 
   return notes.where((note) {
     if (query.isNotEmpty && !note.searchableText.contains(query)) {
       return false;
     }
 
-    switch (filters.dateFilter) {
-      case DateFilter.today:
-        if (note.dateTime.isBefore(todayStart)) return false;
-      case DateFilter.week:
-        if (note.dateTime.isBefore(weekStart)) return false;
-      case DateFilter.all:
+    if (filters.tagFilter != null &&
+        note.tag.toLowerCase() != filters.tagFilter!.toLowerCase()) {
+      return false;
+    }
+
+    switch (filters.durationFilter) {
+      case DurationFilter.short:
+        if (note.durationSeconds >= 5 * 60) return false;
+      case DurationFilter.medium:
+        if (note.durationSeconds < 5 * 60 || note.durationSeconds > 15 * 60) {
+          return false;
+        }
+      case DurationFilter.long:
+        if (note.durationSeconds <= 15 * 60) return false;
+      case DurationFilter.all:
         break;
     }
 
-    switch (filters.tagFilter) {
-      case TagFilter.meeting:
-        if (note.tag != NoteTag.meeting) return false;
-      case TagFilter.lezione:
-        if (note.tag != NoteTag.lezione) return false;
-      case TagFilter.diario:
-        if (note.tag != NoteTag.diario) return false;
-      case TagFilter.all:
+    switch (filters.statusFilter) {
+      case StatusFilter.processing:
+        if (!note.analysisStatus.isProcessing) return false;
+      case StatusFilter.ready:
+        if (note.analysisStatus != NoteAnalysisStatus.ready) return false;
+      case StatusFilter.failed:
+        if (note.analysisStatus != NoteAnalysisStatus.failed) return false;
+      case StatusFilter.all:
         break;
     }
 

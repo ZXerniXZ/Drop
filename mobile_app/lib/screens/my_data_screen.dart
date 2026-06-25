@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../config/api_config.dart';
 import '../models/ai_preferences.dart';
+import '../models/note_tags_config.dart';
 import '../services/app_preferences_service.dart';
 import '../services/audio_storage_service.dart';
 import '../services/local_database_service.dart';
@@ -18,6 +19,7 @@ class MyDataScreen extends StatefulWidget {
 
 class _MyDataScreenState extends State<MyDataScreen> {
   AiPreferences _aiPrefs = const AiPreferences();
+  NoteTagsConfig _noteTags = const NoteTagsConfig();
   UsageStats? _usage;
   AudioStorageInfo? _storage;
   ServerStatus _serverStatus = ServerStatus.checking;
@@ -45,6 +47,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
 
     final notes = await LocalDatabaseService.instance.getAllNotes();
     final prefs = await AppPreferencesService.instance.loadAiPreferences();
+    final tags = await AppPreferencesService.instance.loadNoteTags();
     final storage = await AudioStorageService.getStorageInfo();
     final server = await ServerHealthService.checkHealth();
 
@@ -53,10 +56,16 @@ class _MyDataScreenState extends State<MyDataScreen> {
     setState(() {
       _usage = UsageStatsService.compute(notes);
       _aiPrefs = prefs;
+      _noteTags = tags;
       _storage = storage;
       _serverStatus = server;
       _isLoading = false;
     });
+  }
+
+  Future<void> _saveNoteTags(NoteTagsConfig config) async {
+    await AppPreferencesService.instance.saveNoteTags(config);
+    setState(() => _noteTags = config);
   }
 
   Future<void> _saveAiPreferences(AiPreferences prefs) async {
@@ -129,6 +138,11 @@ class _MyDataScreenState extends State<MyDataScreen> {
             prefs: _aiPrefs,
             promptController: _promptController,
             onChanged: _saveAiPreferences,
+          ),
+          const SizedBox(height: 16),
+          _NoteTagsCard(
+            config: _noteTags,
+            onChanged: _saveNoteTags,
           ),
           const SizedBox(height: 16),
           _StorageCard(
@@ -291,6 +305,104 @@ class _UsageCard extends StatelessWidget {
                       fontSize: 9,
                       color: DropColors.muted(context),
                     ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NoteTagsCard extends StatefulWidget {
+  const _NoteTagsCard({
+    required this.config,
+    required this.onChanged,
+  });
+
+  final NoteTagsConfig config;
+  final Future<void> Function(NoteTagsConfig) onChanged;
+
+  @override
+  State<_NoteTagsCard> createState() => _NoteTagsCardState();
+}
+
+class _NoteTagsCardState extends State<_NoteTagsCard> {
+  final _newTagController = TextEditingController();
+
+  @override
+  void dispose() {
+    _newTagController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _addTag() async {
+    final value = _newTagController.text.trim();
+    if (value.isEmpty) return;
+    final updated = [...widget.config.tags];
+    if (!updated.any((t) => t.toLowerCase() == value.toLowerCase())) {
+      updated.add(value);
+    }
+    _newTagController.clear();
+    await widget.onChanged(NoteTagsConfig(tags: updated));
+  }
+
+  Future<void> _removeTag(String tag) async {
+    final updated = widget.config.tags.where((t) => t != tag).toList();
+    if (updated.isEmpty) return;
+    await widget.onChanged(NoteTagsConfig(tags: updated));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _SectionCard(
+      icon: Icons.label_outline,
+      title: 'Tag note',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'L\'AI sceglie un tag da questa lista dopo ogni trascrizione.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: DropColors.muted(context),
+                ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: widget.config.tags.map((tag) {
+              return InputChip(
+                label: Text(tag),
+                onDeleted: widget.config.tags.length > 1
+                    ? () => _removeTag(tag)
+                    : null,
+                deleteIconColor: DropColors.muted(context),
+                side: BorderSide(color: DropColors.border(context)),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _newTagController,
+                  decoration: InputDecoration(
+                    hintText: 'Nuovo tag...',
+                    isDense: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: DropColors.border(context)),
+                    ),
+                  ),
+                  onSubmitted: (_) => _addTag(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                onPressed: _addTag,
+                icon: const Icon(Icons.add, size: 20),
               ),
             ],
           ),

@@ -3,167 +3,224 @@ import 'package:flutter/material.dart';
 import '../models/note_filters.dart';
 import '../theme/drop_theme.dart';
 
-class NoteSearchBar extends StatelessWidget {
-  const NoteSearchBar({
+class FileSearchFilters extends StatelessWidget {
+  const FileSearchFilters({
     super.key,
-    required this.controller,
-    required this.isExpanded,
-    required this.onToggle,
-    required this.onChanged,
+    required this.searchController,
+    required this.filters,
+    required this.availableTags,
+    required this.filtersVisible,
+    required this.onSearchChanged,
+    required this.onToggleFilters,
+    required this.onTagChanged,
+    required this.onDurationChanged,
+    required this.onStatusChanged,
   });
 
-  final TextEditingController controller;
-  final bool isExpanded;
-  final VoidCallback onToggle;
-  final ValueChanged<String> onChanged;
+  final TextEditingController searchController;
+  final NoteFilters filters;
+  final List<String> availableTags;
+  final bool filtersVisible;
+  final ValueChanged<String> onSearchChanged;
+  final VoidCallback onToggleFilters;
+  final ValueChanged<String?> onTagChanged;
+  final ValueChanged<DurationFilter> onDurationChanged;
+  final ValueChanged<StatusFilter> onStatusChanged;
 
   @override
   Widget build(BuildContext context) {
-    if (!isExpanded) {
-      return IconButton(
-        onPressed: onToggle,
-        icon: const Icon(Icons.search, size: 20),
-        style: IconButton.styleFrom(
-          side: BorderSide(color: DropColors.border(context)),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      );
-    }
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final fieldBg = isDark
+        ? Colors.white.withValues(alpha: 0.06)
+        : Colors.black.withValues(alpha: 0.05);
 
-    return Expanded(
-      child: TextField(
-        controller: controller,
-        onChanged: onChanged,
-        autofocus: true,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 14),
-        decoration: InputDecoration(
-          hintText: 'Cerca per titolo o testo...',
-          hintStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: DropColors.muted(context),
-                fontSize: 13,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: fieldBg,
+                    borderRadius: BorderRadius.circular(22),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  child: Row(
+                    children: [
+                      Icon(Icons.search, size: 18, color: DropColors.muted(context)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: searchController,
+                          onChanged: onSearchChanged,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                fontSize: 14,
+                              ),
+                          decoration: InputDecoration(
+                            hintText: 'Cerca per titolo, trascrizione...',
+                            hintStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  fontSize: 13,
+                                  color: DropColors.muted(context),
+                                ),
+                            border: InputBorder.none,
+                            isDense: true,
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-          prefixIcon: Icon(Icons.search, size: 18, color: DropColors.muted(context)),
-          suffixIcon: IconButton(
-            icon: const Icon(Icons.close, size: 18),
-            onPressed: () {
-              controller.clear();
-              onChanged('');
-              onToggle();
-            },
+              const SizedBox(width: 10),
+              Material(
+                color: filters.hasActiveFilters || filtersVisible
+                    ? Theme.of(context).colorScheme.onSurface
+                    : fieldBg,
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  onTap: onToggleFilters,
+                  borderRadius: BorderRadius.circular(12),
+                  child: SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Icon(
+                      Icons.filter_list,
+                      size: 20,
+                      color: filters.hasActiveFilters || filtersVisible
+                          ? Theme.of(context).colorScheme.surface
+                          : DropColors.muted(context),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-          isDense: true,
-          contentPadding: const EdgeInsets.symmetric(vertical: 10),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: DropColors.border(context)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: DropColors.border(context)),
-          ),
-        ),
+          if (filtersVisible) ...[
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: _FilterDropdown<String?>(
+                    label: 'TIPO NOTA',
+                    value: filters.tagFilter,
+                    items: [
+                      const _DropdownItem<String?>(null, 'Tutti'),
+                      ...availableTags.map(
+                        (t) => _DropdownItem<String?>(t, t),
+                      ),
+                    ],
+                    onChanged: onTagChanged,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _FilterDropdown<DurationFilter>(
+                    label: 'DURATA',
+                    value: filters.durationFilter,
+                    items: const [
+                      _DropdownItem(DurationFilter.all, 'Tutte'),
+                      _DropdownItem(DurationFilter.short, '< 5 min'),
+                      _DropdownItem(DurationFilter.medium, '5–15 min'),
+                      _DropdownItem(DurationFilter.long, '> 15 min'),
+                    ],
+                    onChanged: (v) => onDurationChanged(v ?? DurationFilter.all),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _FilterDropdown<StatusFilter>(
+                    label: 'STATO',
+                    value: filters.statusFilter,
+                    items: const [
+                      _DropdownItem(StatusFilter.all, 'Tutti'),
+                      _DropdownItem(StatusFilter.processing, 'In elaborazione'),
+                      _DropdownItem(StatusFilter.ready, 'Pronte'),
+                      _DropdownItem(StatusFilter.failed, 'Fallite'),
+                    ],
+                    onChanged: (v) => onStatusChanged(v ?? StatusFilter.all),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
       ),
     );
   }
 }
 
-class NoteFilterBar extends StatelessWidget {
-  const NoteFilterBar({
-    super.key,
-    required this.filters,
-    required this.onDateChanged,
-    required this.onTagChanged,
+class _DropdownItem<T> {
+  const _DropdownItem(this.value, this.label);
+  final T value;
+  final String label;
+}
+
+class _FilterDropdown<T> extends StatelessWidget {
+  const _FilterDropdown({
+    required this.label,
+    required this.value,
+    required this.items,
+    required this.onChanged,
   });
 
-  final NoteFilters filters;
-  final ValueChanged<DateFilter> onDateChanged;
-  final ValueChanged<TagFilter> onTagChanged;
+  final String label;
+  final T value;
+  final List<_DropdownItem<T>> items;
+  final ValueChanged<T?> onChanged;
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              Text(
-                'DATA',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      fontSize: 9,
-                      letterSpacing: 1,
-                    ),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                fontSize: 9,
+                letterSpacing: 0.8,
+                color: DropColors.muted(context),
               ),
-              const SizedBox(width: 8),
-              _chip(context, 'Tutte', filters.dateFilter == DateFilter.all,
-                  () => onDateChanged(DateFilter.all)),
-              _chip(context, 'Oggi', filters.dateFilter == DateFilter.today,
-                  () => onDateChanged(DateFilter.today)),
-              _chip(
-                context,
-                'Ultima settimana',
-                filters.dateFilter == DateFilter.week,
-                () => onDateChanged(DateFilter.week),
-              ),
-            ],
-          ),
         ),
-        const SizedBox(height: 10),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              Text(
-                'TIPO',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      fontSize: 9,
-                      letterSpacing: 1,
+        const SizedBox(height: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.04)
+                : Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: DropColors.border(context)),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<T>(
+              value: value,
+              isExpanded: true,
+              isDense: true,
+              icon: Icon(Icons.expand_more, size: 18, color: DropColors.muted(context)),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 13),
+              items: items
+                  .map(
+                    (item) => DropdownMenuItem<T>(
+                      value: item.value,
+                      child: Text(
+                        item.label,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-              ),
-              const SizedBox(width: 8),
-              _chip(context, 'Tutti', filters.tagFilter == TagFilter.all,
-                  () => onTagChanged(TagFilter.all)),
-              _chip(context, 'Meeting', filters.tagFilter == TagFilter.meeting,
-                  () => onTagChanged(TagFilter.meeting)),
-              _chip(context, 'Lezione', filters.tagFilter == TagFilter.lezione,
-                  () => onTagChanged(TagFilter.lezione)),
-              _chip(context, 'Diario', filters.tagFilter == TagFilter.diario,
-                  () => onTagChanged(TagFilter.diario)),
-            ],
+                  )
+                  .toList(),
+              onChanged: onChanged,
+            ),
           ),
         ),
       ],
-    );
-  }
-
-  Widget _chip(
-    BuildContext context,
-    String label,
-    bool selected,
-    VoidCallback onTap,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: FilterChip(
-        label: Text(
-          label.toUpperCase(),
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                fontSize: 9,
-                fontWeight: selected ? FontWeight.bold : FontWeight.w600,
-              ),
-        ),
-        selected: selected,
-        onSelected: (_) => onTap(),
-        showCheckmark: false,
-        visualDensity: VisualDensity.compact,
-        side: BorderSide(color: DropColors.border(context)),
-        selectedColor: Theme.of(context).brightness == Brightness.dark
-            ? Colors.white.withValues(alpha: 0.12)
-            : Colors.black.withValues(alpha: 0.08),
-      ),
     );
   }
 }
