@@ -2,12 +2,16 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
-/// IP del PC in rete locale — modifica con l'indirizzo del tuo backend.
+/// URL produzione (Cloudflare Tunnel) — usato automaticamente nelle build release (APK CI).
+const String productionBackendUrl = 'https://api.drop-prj.xyz/upload-audio';
+
+/// IP del PC in rete locale — solo per sviluppo in debug (`flutter run`).
 const String physicalDeviceBackendHost = 'http://192.168.1.100:8080';
 
 void main() {
@@ -120,6 +124,9 @@ class _RecorderScreenState extends State<RecorderScreen> {
   }
 
   Future<String> _resolveUploadUrl() async {
+    if (kReleaseMode) {
+      return productionBackendUrl;
+    }
     if (Platform.isAndroid) {
       if (await _isAndroidEmulator()) {
         return 'http://10.0.2.2:8080/upload-audio';
