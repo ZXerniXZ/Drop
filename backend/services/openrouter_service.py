@@ -3,7 +3,7 @@ from pathlib import Path
 
 import httpx
 
-from config import OPENROUTER_API_KEY
+from config import OPENROUTER_API_KEY, TRANSCRIPTION_TIMEOUT_SECONDS
 
 OPENROUTER_TRANSCRIPTIONS_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
 WHISPER_MODEL = "openai/whisper-large-v3"
@@ -63,7 +63,11 @@ async def transcribe_audio(file_path: str, language: str | None = None) -> str:
         if lang_code:
             payload["language"] = lang_code
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    timeout = httpx.Timeout(
+        TRANSCRIPTION_TIMEOUT_SECONDS,
+        connect=30.0,
+    )
+    async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(
             OPENROUTER_TRANSCRIPTIONS_URL,
             json=payload,

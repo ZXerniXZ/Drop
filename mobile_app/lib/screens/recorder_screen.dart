@@ -180,6 +180,49 @@ class _RecorderScreenState extends State<RecorderScreen> {
     return ApiUrlResolver.resolveEndpoint('/upload-audio');
   }
 
+  Future<String> _resolveJobUrl(String jobId) async {
+    return ApiUrlResolver.resolveEndpoint('/jobs/$jobId');
+  }
+
+  Future<Map<String, dynamic>?> _pollUploadJob(String jobId) async {
+    const maxAttempts = 200;
+    const pollInterval = Duration(seconds: 3);
+
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      if (!mounted) return null;
+
+      final url = await _resolveJobUrl(jobId);
+      final response = await http.get(Uri.parse(url));
+
+      if (response.statusCode == 404) {
+        await Future<void>.delayed(pollInterval);
+        continue;
+      }
+
+      if (response.statusCode != 200) {
+        throw Exception('Polling fallito (${response.statusCode})');
+      }
+
+      final job = jsonDecode(response.body) as Map<String, dynamic>;
+      final status = job['status'] as String?;
+
+      if (status == 'completed') {
+        final result = job['result'];
+        if (result is Map<String, dynamic>) return result;
+        throw Exception('Risposta job incompleta');
+      }
+
+      if (status == 'failed') {
+        final error = job['error'] as String? ?? 'Elaborazione fallita';
+        throw Exception(error);
+      }
+
+      await Future<void>.delayed(pollInterval);
+    }
+
+    throw Exception('Timeout elaborazione (oltre 10 minuti)');
+  }
+
   Future<void> _processUpload({
     required String noteId,
     required String filePath,
@@ -209,10 +252,18 @@ class _RecorderScreenState extends State<RecorderScreen> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final jobId = data['job_id'] as String?;
+        if (jobId == null || jobId.isEmpty) {
+          throw Exception('Risposta server senza job_id');
+        }
+
+        final result = await _pollUploadJob(jobId);
+        if (!mounted || result == null) return;
+
         final persistedPath =
             await _persistAudioFile(filePath, noteId) ?? filePath;
         final note = _noteFromResponse(
-          data,
+          result,
           placeholder: placeholder,
           audioPath: persistedPath,
         );
@@ -228,9 +279,14 @@ class _RecorderScreenState extends State<RecorderScreen> {
           ),
         );
       } else {
+        var errorDetail = response.body;
+        try {
+          final errJson = jsonDecode(response.body) as Map<String, dynamic>;
+          errorDetail = errJson['detail']?.toString() ?? errorDetail;
+        } catch (_) {}
         final failed = placeholder.copyWith(
           analysisStatus: NoteAnalysisStatus.failed,
-          transcription: 'Upload fallito (${response.statusCode})',
+          transcription: 'Upload fallito (${response.statusCode}): $errorDetail',
         );
         await LocalDatabaseService.instance.saveNote(failed);
         if (!mounted) return;

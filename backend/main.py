@@ -9,8 +9,7 @@ from fastapi.responses import StreamingResponse
 
 import config  # noqa: F401
 from services.chat_service import NoteChatRequest, stream_note_chat
-from services.llm_service import process_transcript
-from services.openrouter_service import transcribe_audio
+from services.job_service import get_job, start_upload_job
 
 STORAGE_DIR = Path(__file__).parent / "storage"
 
@@ -23,6 +22,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _parse_tags_list(available_tags: str | None) -> list[str] | None:
+    if not available_tags or not available_tags.strip():
+        return None
+    try:
+        parsed = json.loads(available_tags)
+        if isinstance(parsed, list):
+            return [str(t).strip() for t in parsed if str(t).strip()]
+    except json.JSONDecodeError:
+        return None
+    return None
 
 
 @app.post("/upload-audio")
@@ -43,48 +54,38 @@ async def upload_audio(
     content = await file.read()
     destination.write_bytes(content)
 
-    try:
-        transcription = await transcribe_audio(str(destination), language=language)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Transcription failed: {exc}",
-        ) from exc
+    job_id = str(uuid.uuid4())
+    start_upload_job(
+        job_id,
+        file_path=str(destination),
+        saved_name=saved_name,
+        ai_model=ai_model,
+        language=language,
+        custom_prompt=custom_prompt,
+        available_tags=_parse_tags_list(available_tags),
+    )
 
-    tags_list: list[str] | None = None
-    if available_tags and available_tags.strip():
-        try:
-            parsed = json.loads(available_tags)
-            if isinstance(parsed, list):
-                tags_list = [str(t).strip() for t in parsed if str(t).strip()]
-        except json.JSONDecodeError:
-            tags_list = None
+    return {
+        "success": True,
+        "job_id": job_id,
+        "status": "processing",
+    }
 
-    try:
-        processed = await process_transcript(
-            transcription,
-            model=ai_model,
-            custom_prompt=custom_prompt,
-            language=language,
-            available_tags=tags_list,
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"LLM processing failed: {exc}",
-        ) from exc
+
+@app.get("/jobs/{job_id}")
+async def get_upload_job(job_id: str):
+    job = get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
 
     response: dict[str, Any] = {
-        "success": True,
-        "filename": saved_name,
-        "raw_transcription": transcription,
-        "title": processed["title"],
-        "formatted_transcription": processed["formatted_transcript"],
-        "summary": processed["summary"],
-        "highlights": processed["highlights"],
-        "key_data": processed["key_data"],
-        "speaker_view": processed["speaker_view"],
+        "job_id": job_id,
+        "status": job["status"],
     }
+    if job.get("error"):
+        response["error"] = job["error"]
+    if job.get("result"):
+        response["result"] = job["result"]
     return response
 
 

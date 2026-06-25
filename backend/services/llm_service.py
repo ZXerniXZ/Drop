@@ -4,10 +4,9 @@ from typing import Any
 
 import httpx
 
-from config import OPENROUTER_API_KEY, OPENROUTER_LLM_MODEL
+from config import OPENROUTER_API_KEY, OPENROUTER_LLM_MODEL, LLM_TIMEOUT_SECONDS
 
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
-LLM_TIMEOUT_SECONDS = 180.0
 APP_REFERER = "https://github.com/ZXerniXZ/Drop"
 APP_TITLE = "Drop"
 
