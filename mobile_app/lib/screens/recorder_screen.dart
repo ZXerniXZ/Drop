@@ -16,11 +16,13 @@ import '../services/app_preferences_service.dart';
 import '../models/note_filters.dart';
 import '../services/audio_recording_config.dart';
 import '../services/local_database_service.dart';
+import '../services/openrouter_client.dart';
 import '../services/recording_foreground_service.dart';
 import '../theme/drop_theme.dart';
 import '../utils/note_filter_utils.dart';
 import '../widgets/note_filter_bar.dart';
 import '../widgets/drop_bottom_nav.dart';
+import '../widgets/drop_logo.dart';
 import '../widgets/note_list_card.dart';
 import 'note_detail_screen.dart';
 import 'my_data_screen.dart';
@@ -229,69 +231,85 @@ class _RecorderScreenState extends State<RecorderScreen> {
     required int durationSeconds,
   }) async {
     try {
-      final url = await _resolveUploadUrl();
       final prefs = await AppPreferencesService.instance.loadAiPreferences();
       final tagsConfig = await AppPreferencesService.instance.loadNoteTags();
-      final request = http.MultipartRequest('POST', Uri.parse(url));
-      request.files.add(await http.MultipartFile.fromPath('file', filePath));
-      request.fields['ai_model'] = prefs.model.openRouterId;
-      request.fields['language'] = prefs.transcriptionLanguage.name;
-      request.fields['available_tags'] = jsonEncode(tagsConfig.tags);
-      if (prefs.customPrompt.trim().isNotEmpty) {
-        request.fields['custom_prompt'] = prefs.customPrompt.trim();
-      }
-
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
-
-      if (!mounted) return;
+      final apiKey = await AppPreferencesService.instance.loadOpenRouterApiKey();
 
       final index = _notes.indexWhere((n) => n.id == noteId);
       if (index == -1) return;
       final placeholder = _notes[index];
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final jobId = data['job_id'] as String?;
-        if (jobId == null || jobId.isEmpty) {
-          throw Exception('Risposta server senza job_id');
-        }
+      Map<String, dynamic>? result;
 
-        final result = await _pollUploadJob(jobId);
-        if (!mounted || result == null) return;
-
-        final persistedPath =
-            await _persistAudioFile(filePath, noteId) ?? filePath;
-        final note = _noteFromResponse(
-          result,
-          placeholder: placeholder,
-          audioPath: persistedPath,
-        );
-
-        await LocalDatabaseService.instance.saveNote(note);
-        if (!mounted) return;
-        _updateNoteInList(note);
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Trascrizione completata'),
-            backgroundColor: Colors.green,
-          ),
+      if (apiKey != null && apiKey.isNotEmpty) {
+        result = await OpenRouterClient.instance.processAudioFile(
+          filePath: filePath,
+          apiKey: apiKey,
+          prefs: prefs,
+          availableTags: tagsConfig.tags,
         );
       } else {
-        var errorDetail = response.body;
-        try {
-          final errJson = jsonDecode(response.body) as Map<String, dynamic>;
-          errorDetail = errJson['detail']?.toString() ?? errorDetail;
-        } catch (_) {}
-        final failed = placeholder.copyWith(
-          analysisStatus: NoteAnalysisStatus.failed,
-          transcription: 'Upload fallito (${response.statusCode}): $errorDetail',
-        );
-        await LocalDatabaseService.instance.saveNote(failed);
+        final url = await _resolveUploadUrl();
+        final request = http.MultipartRequest('POST', Uri.parse(url));
+        request.files.add(await http.MultipartFile.fromPath('file', filePath));
+        request.fields['ai_model'] = prefs.model.openRouterId;
+        request.fields['language'] = prefs.transcriptionLanguage.name;
+        request.fields['available_tags'] = jsonEncode(tagsConfig.tags);
+        if (prefs.customPrompt.trim().isNotEmpty) {
+          request.fields['custom_prompt'] = prefs.customPrompt.trim();
+        }
+
+        final streamedResponse = await request.send();
+        final response = await http.Response.fromStream(streamedResponse);
+
         if (!mounted) return;
-        _updateNoteInList(failed);
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          final jobId = data['job_id'] as String?;
+          if (jobId == null || jobId.isEmpty) {
+            throw Exception('Risposta server senza job_id');
+          }
+          result = await _pollUploadJob(jobId);
+        } else {
+          var errorDetail = response.body;
+          try {
+            final errJson = jsonDecode(response.body) as Map<String, dynamic>;
+            errorDetail = errJson['detail']?.toString() ?? errorDetail;
+          } catch (_) {}
+          final failed = placeholder.copyWith(
+            analysisStatus: NoteAnalysisStatus.failed,
+            transcription: 'Upload fallito (${response.statusCode}): $errorDetail',
+          );
+          await LocalDatabaseService.instance.saveNote(failed);
+          if (!mounted) return;
+          _updateNoteInList(failed);
+          return;
+        }
       }
+
+      if (!mounted) return;
+
+      if (result == null) return;
+
+      final persistedPath =
+          await _persistAudioFile(filePath, noteId) ?? filePath;
+      final note = _noteFromResponse(
+        result,
+        placeholder: placeholder,
+        audioPath: persistedPath,
+      );
+
+      await LocalDatabaseService.instance.saveNote(note);
+      if (!mounted) return;
+      _updateNoteInList(note);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Trascrizione completata'),
+          backgroundColor: Colors.green,
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       final index = _notes.indexWhere((n) => n.id == noteId);
@@ -508,13 +526,16 @@ class _RecorderScreenState extends State<RecorderScreen> {
       padding: const EdgeInsets.fromLTRB(24, 8, 16, 4),
       child: Row(
         children: [
-          Text(
-            _activeTab == DropNavTab.file ? 'DROP' : 'IMPOSTAZIONI',
-            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.5,
-                ),
-          ),
+          if (_activeTab == DropNavTab.file)
+            const DropLogo(height: 30)
+          else
+            Text(
+              'Impostazioni',
+              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.3,
+                  ),
+            ),
           const Spacer(),
           if (_activeTab == DropNavTab.file)
             Text(

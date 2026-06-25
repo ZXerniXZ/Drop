@@ -164,8 +164,8 @@ class _NoteChatSheetState extends State<NoteChatSheet> {
               controller: _inputController,
               enabled: !widget.note.isProcessing && !_streaming,
               hintText: widget.note.isProcessing
-                  ? 'ANALISI IN CORSO...'
-                  : 'ASK DROP ABOUT THIS NOTE...',
+                  ? 'Analisi in corso...'
+                  : 'Chiedi a Drop su questa nota...',
               onSend: () => _sendMessage(_inputController.text),
             ),
           ],

@@ -26,8 +26,8 @@ void main() {
     await tester.pumpWidget(const DropApp());
     await tester.pump();
 
-    expect(find.text('DROP'), findsOneWidget);
-    expect(find.text('FILE'), findsOneWidget);
+    expect(find.bySemanticsLabel('Drop'), findsOneWidget);
+    expect(find.text('File'), findsOneWidget);
     expect(find.text('0 note'), findsOneWidget);
   });
 }

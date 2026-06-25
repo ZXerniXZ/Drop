@@ -90,11 +90,11 @@ class _NavItem extends StatelessWidget {
             Icon(icon, size: 20, color: color),
             const SizedBox(height: 4),
             Text(
-              label.toUpperCase(),
+              label,
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     color: color,
-                    fontSize: 9,
-                    fontWeight: FontWeight.bold,
+                    fontSize: 10,
+                    fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
                   ),
             ),
             const SizedBox(height: 6),

@@ -110,7 +110,7 @@ class NoteListCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
-                      'NUOVA',
+                      'Nuova',
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
                             color: DropColors.recordRed,
                             fontSize: 9,
@@ -155,55 +155,17 @@ class NoteListCard extends StatelessWidget {
                   ),
                 ],
                 const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.calendar_today_outlined,
-                      size: 13,
-                      color: DropColors.muted(context),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      dateLabel,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            letterSpacing: 0.4,
-                            fontWeight: FontWeight.w500,
-                          ),
-                    ),
-                    if (note.durationLabel.isNotEmpty) ...[
-                      const SizedBox(width: 12),
-                      Icon(
-                        Icons.schedule_outlined,
-                        size: 13,
+                Text(
+                  [
+                    dateLabel,
+                    if (note.durationLabel.isNotEmpty) note.durationLabel,
+                    note.tag,
+                  ].join(' · '),
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        letterSpacing: 0.2,
+                        fontWeight: FontWeight.w500,
                         color: DropColors.muted(context),
                       ),
-                      const SizedBox(width: 4),
-                      Text(
-                        note.durationLabel,
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              letterSpacing: 0.4,
-                              fontWeight: FontWeight.w500,
-                            ),
-                      ),
-                    ],
-                    const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: DropColors.border(context),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        note.tag.toUpperCase(),
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              fontSize: 9,
-                            ),
-                      ),
-                    ),
-                  ],
                 ),
               ],
             ),

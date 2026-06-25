@@ -10,6 +10,38 @@ import '../models/note_chat_message.dart';
 import 'api_url_resolver.dart';
 import 'app_preferences_service.dart';
 import 'local_database_service.dart';
+import 'openrouter_client.dart';
+
+ChatStreamEvent? parseServerSseDataLine(String line) {
+  final trimmed = line.trim();
+  if (!trimmed.startsWith('data:')) return null;
+  final dataStr = trimmed.substring(5).trim();
+  if (dataStr == '[DONE]') return null;
+
+  final parsed = jsonDecode(dataStr) as Map<String, dynamic>;
+  final type = parsed['type'] as String?;
+  switch (type) {
+    case 'reasoning':
+      final delta = parsed['delta'] as String? ?? '';
+      if (delta.isEmpty) return null;
+      return ChatReasoningDelta(delta);
+    case 'content':
+      final delta = parsed['delta'] as String? ?? '';
+      if (delta.isEmpty) return null;
+      return ChatContentDelta(delta);
+    case 'done':
+      return ChatStreamDone(
+        content: parsed['content'] as String? ?? '',
+        reasoning: parsed['reasoning'] as String?,
+      );
+    case 'error':
+      return ChatStreamError(
+        parsed['message'] as String? ?? 'Errore sconosciuto',
+      );
+    default:
+      return null;
+  }
+}
 
 class NoteChatService {
   NoteChatService._();
@@ -89,7 +121,34 @@ class NoteChatService {
         historyForApi.last.content == message) {
       historyForApi = historyForApi.sublist(0, historyForApi.length - 1);
     }
-    final historyPayload = historyForApi
+
+    final apiKey = await AppPreferencesService.instance.loadOpenRouterApiKey();
+    if (apiKey != null && apiKey.isNotEmpty) {
+      yield* OpenRouterClient.instance.streamNoteChat(
+        apiKey: apiKey,
+        note: note,
+        message: message,
+        history: historyForApi,
+        aiModel: prefs.model.openRouterId,
+      );
+      return;
+    }
+
+    yield* _streamViaServer(
+      note: note,
+      message: message,
+      history: historyForApi,
+      aiModel: prefs.model.openRouterId,
+    );
+  }
+
+  Stream<ChatStreamEvent> _streamViaServer({
+    required AudioNote note,
+    required String message,
+    required List<NoteChatMessage> history,
+    required String aiModel,
+  }) async* {
+    final historyPayload = history
         .map((m) => {'role': m.role, 'content': m.content})
         .toList();
 
@@ -97,7 +156,7 @@ class NoteChatService {
     final body = jsonEncode({
       'message': message,
       'history': historyPayload,
-      'ai_model': prefs.model.openRouterId,
+      'ai_model': aiModel,
       'note_context': _noteContextFromAudioNote(note),
     });
 
@@ -124,41 +183,13 @@ class NoteChatService {
           final lineEnd = buffer.indexOf('\n');
           if (lineEnd == -1) break;
 
-          var line = buffer.substring(0, lineEnd).trim();
+          final line = buffer.substring(0, lineEnd);
           buffer = buffer.substring(lineEnd + 1);
 
-          if (line.isEmpty || line.startsWith(':')) continue;
-          if (!line.startsWith('data:')) continue;
-
-          final dataStr = line.substring(5).trim();
-          if (dataStr == '[DONE]') return;
-
-          Map<String, dynamic> parsed;
-          try {
-            parsed = jsonDecode(dataStr) as Map<String, dynamic>;
-          } catch (_) {
-            continue;
-          }
-
-          final type = parsed['type'] as String?;
-          switch (type) {
-            case 'reasoning':
-              final delta = parsed['delta'] as String? ?? '';
-              if (delta.isNotEmpty) yield ChatReasoningDelta(delta);
-            case 'content':
-              final delta = parsed['delta'] as String? ?? '';
-              if (delta.isNotEmpty) yield ChatContentDelta(delta);
-            case 'done':
-              yield ChatStreamDone(
-                content: parsed['content'] as String? ?? '',
-                reasoning: parsed['reasoning'] as String?,
-              );
-            case 'error':
-              yield ChatStreamError(
-                parsed['message'] as String? ?? 'Errore sconosciuto',
-              );
-              return;
-          }
+          final event = parseServerSseDataLine(line);
+          if (event == null) continue;
+          yield event;
+          if (event is ChatStreamError) return;
         }
       }
     } catch (e) {

@@ -6,6 +6,7 @@ import '../models/note_tags_config.dart';
 import '../services/app_preferences_service.dart';
 import '../services/audio_storage_service.dart';
 import '../services/local_database_service.dart';
+import '../services/openrouter_client.dart';
 import '../services/server_health_service.dart';
 import '../services/usage_stats_service.dart';
 import '../theme/drop_theme.dart';
@@ -25,7 +26,11 @@ class _MyDataScreenState extends State<MyDataScreen> {
   ServerStatus _serverStatus = ServerStatus.checking;
   bool _isLoading = true;
   bool _isClearing = false;
+  bool _hasCustomApiKey = false;
+  bool _isTestingApiKey = false;
+  bool _obscureApiKey = true;
   final _promptController = TextEditingController();
+  final _apiKeyController = TextEditingController();
 
   @override
   void initState() {
@@ -36,6 +41,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
   @override
   void dispose() {
     _promptController.dispose();
+    _apiKeyController.dispose();
     super.dispose();
   }
 
@@ -48,17 +54,21 @@ class _MyDataScreenState extends State<MyDataScreen> {
     final notes = await LocalDatabaseService.instance.getAllNotes();
     final prefs = await AppPreferencesService.instance.loadAiPreferences();
     final tags = await AppPreferencesService.instance.loadNoteTags();
+    final apiKey = await AppPreferencesService.instance.loadOpenRouterApiKey();
+    final hasCustomKey = await AppPreferencesService.instance.hasCustomOpenRouterKey;
     final storage = await AudioStorageService.getStorageInfo();
     final server = await ServerHealthService.checkHealth();
 
     if (!mounted) return;
     _promptController.text = prefs.customPrompt;
+    _apiKeyController.text = apiKey ?? '';
     setState(() {
       _usage = UsageStatsService.compute(notes);
       _aiPrefs = prefs;
       _noteTags = tags;
       _storage = storage;
       _serverStatus = server;
+      _hasCustomApiKey = hasCustomKey;
       _isLoading = false;
     });
   }
@@ -71,6 +81,58 @@ class _MyDataScreenState extends State<MyDataScreen> {
   Future<void> _saveAiPreferences(AiPreferences prefs) async {
     await AppPreferencesService.instance.saveAiPreferences(prefs);
     setState(() => _aiPrefs = prefs);
+  }
+
+  Future<void> _saveOpenRouterApiKey() async {
+    await AppPreferencesService.instance.saveOpenRouterApiKey(
+      _apiKeyController.text,
+    );
+    final hasCustomKey =
+        await AppPreferencesService.instance.hasCustomOpenRouterKey;
+    if (!mounted) return;
+    setState(() => _hasCustomApiKey = hasCustomKey);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          hasCustomKey
+              ? 'Chiave OpenRouter salvata'
+              : 'Uso server Drop ripristinato',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _clearOpenRouterApiKey() async {
+    await AppPreferencesService.instance.clearOpenRouterApiKey();
+    _apiKeyController.clear();
+    if (!mounted) return;
+    setState(() => _hasCustomApiKey = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Chiave rimossa — uso server Drop')),
+    );
+  }
+
+  Future<void> _testOpenRouterApiKey() async {
+    final key = _apiKeyController.text.trim();
+    if (key.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Inserisci una chiave API prima di testare')),
+      );
+      return;
+    }
+
+    setState(() => _isTestingApiKey = true);
+    final ok = await OpenRouterClient.instance.testConnection(key);
+    if (!mounted) return;
+    setState(() => _isTestingApiKey = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok ? 'Connessione OpenRouter riuscita' : 'Connessione fallita',
+        ),
+        backgroundColor: ok ? Colors.green : DropColors.recordRed,
+      ),
+    );
   }
 
   Future<void> _clearCache() async {
@@ -140,6 +202,18 @@ class _MyDataScreenState extends State<MyDataScreen> {
             onChanged: _saveAiPreferences,
           ),
           const SizedBox(height: 16),
+          _OpenRouterCard(
+            apiKeyController: _apiKeyController,
+            hasCustomKey: _hasCustomApiKey,
+            obscureApiKey: _obscureApiKey,
+            isTesting: _isTestingApiKey,
+            onToggleObscure: () =>
+                setState(() => _obscureApiKey = !_obscureApiKey),
+            onSave: _saveOpenRouterApiKey,
+            onClear: _clearOpenRouterApiKey,
+            onTest: _testOpenRouterApiKey,
+          ),
+          const SizedBox(height: 16),
           _NoteTagsCard(
             config: _noteTags,
             onChanged: _saveNoteTags,
@@ -196,10 +270,11 @@ class _SectionCard extends StatelessWidget {
               Icon(icon, size: 16),
               const SizedBox(width: 10),
               Text(
-                title.toUpperCase(),
+                title,
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.2,
+                      fontSize: 11,
                     ),
               ),
             ],
@@ -235,7 +310,7 @@ class _UsageCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'MINUTI REGISTRATI',
+                      'Minuti registrati',
                       style: Theme.of(context).textTheme.labelSmall,
                     ),
                     const SizedBox(height: 4),
@@ -289,7 +364,7 @@ class _UsageCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'COSTO API STIMATO',
+                    'Costo API stimato',
                     style: Theme.of(context).textTheme.labelSmall,
                   ),
                   const SizedBox(height: 4),
@@ -300,7 +375,7 @@ class _UsageCard extends StatelessWidget {
                 ],
               ),
               Text(
-                'OBIETTIVO PERSONALE',
+                'Obiettivo personale',
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
                       fontSize: 9,
                       color: DropColors.muted(context),
@@ -482,6 +557,137 @@ class _AiSettingsCard extends StatelessWidget {
   }
 }
 
+class _OpenRouterCard extends StatelessWidget {
+  const _OpenRouterCard({
+    required this.apiKeyController,
+    required this.hasCustomKey,
+    required this.obscureApiKey,
+    required this.isTesting,
+    required this.onToggleObscure,
+    required this.onSave,
+    required this.onClear,
+    required this.onTest,
+  });
+
+  final TextEditingController apiKeyController;
+  final bool hasCustomKey;
+  final bool obscureApiKey;
+  final bool isTesting;
+  final VoidCallback onToggleObscure;
+  final Future<void> Function() onSave;
+  final Future<void> Function() onClear;
+  final Future<void> Function() onTest;
+
+  @override
+  Widget build(BuildContext context) {
+    final modeColor = hasCustomKey ? Colors.blue : Colors.green;
+    final modeLabel = hasCustomKey ? 'Chiave personale' : 'Server Drop';
+
+    return _SectionCard(
+      icon: Icons.key_outlined,
+      title: 'OpenRouter',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Lascia vuoto per usare il server Drop.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: DropColors.muted(context),
+                ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: modeColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  modeLabel,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: modeColor,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 10,
+                      ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: apiKeyController,
+            obscureText: obscureApiKey,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  fontSize: 13,
+                  fontFamily: 'monospace',
+                ),
+            decoration: InputDecoration(
+              hintText: 'sk-or-...',
+              isDense: true,
+              suffixIcon: IconButton(
+                onPressed: onToggleObscure,
+                icon: Icon(
+                  obscureApiKey ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                  size: 18,
+                ),
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: DropColors.border(context)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: DropColors.border(context)),
+              ),
+              filled: true,
+              fillColor: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.white.withValues(alpha: 0.02)
+                  : Colors.black.withValues(alpha: 0.02),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: isTesting ? null : onTest,
+                  child: isTesting
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Testa connessione'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FilledButton(
+                  onPressed: onSave,
+                  child: const Text('Salva'),
+                ),
+              ),
+            ],
+          ),
+          if (hasCustomKey) ...[
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: onClear,
+              child: const Text(
+                'Rimuovi chiave',
+                style: TextStyle(color: DropColors.recordRed),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _StorageCard extends StatelessWidget {
   const _StorageCard({
     required this.storage,
@@ -528,7 +734,7 @@ class _StorageCard extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           _ActionButton(
-            label: 'SVUOTA CACHE AUDIO',
+            label: 'Svuota cache audio',
             icon: Icons.delete_outline,
             isDestructive: true,
             isLoading: isClearing,
@@ -536,7 +742,7 @@ class _StorageCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           _ActionButton(
-            label: 'ESPORTA BACKUP JSON',
+            label: 'Esporta backup JSON',
             icon: Icons.download_outlined,
             onTap: onExportBackup,
           ),
@@ -561,10 +767,10 @@ class _ServerStatusCard extends StatelessWidget {
             ? Colors.green
             : DropColors.recordRed;
     final label = isChecking
-        ? 'VERIFICA...'
+        ? 'Verifica...'
         : isOnline
-            ? 'ONLINE'
-            : 'OFFLINE';
+            ? 'Online'
+            : 'Offline';
 
     return _SectionCard(
       icon: Icons.wifi,
@@ -585,7 +791,7 @@ class _ServerStatusCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'ENDPOINT ATTIVO',
+                    'Endpoint attivo',
                     style: Theme.of(context).textTheme.labelSmall,
                   ),
                   const SizedBox(height: 4),
@@ -643,8 +849,10 @@ class _FieldLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Text(
-      label.toUpperCase(),
-      style: Theme.of(context).textTheme.labelSmall,
+      label,
+      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            fontWeight: FontWeight.w500,
+          ),
     );
   }
 }

@@ -9,8 +9,8 @@ class DropColors {
   static const lightSurface = Color(0xFFFFFFFF);
   static const lightScaffold = Color(0xFFFCFCFC);
 
-  static const darkBackground = Color(0xFF0C0C0E);
-  static const darkSurface = Color(0xFF121214);
+  static const darkBackground = Color(0xFF000000);
+  static const darkSurface = Color(0xFF0C0C0E);
   static const darkScaffold = Color(0xFF09090B);
 
   static Color border(BuildContext context) {
@@ -111,8 +111,8 @@ class DropTheme {
       ),
       labelSmall: TextStyle(
         fontSize: 10,
-        fontWeight: FontWeight.w600,
-        letterSpacing: 1.2,
+        fontWeight: FontWeight.w500,
+        letterSpacing: 0.2,
         color: muted,
       ),
     );

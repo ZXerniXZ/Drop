@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'screens/recorder_screen.dart';
+import 'services/app_icon_service.dart';
 import 'theme/drop_theme.dart';
 
 class DropApp extends StatefulWidget {
@@ -13,11 +14,22 @@ class DropApp extends StatefulWidget {
 class _DropAppState extends State<DropApp> {
   ThemeMode _themeMode = ThemeMode.dark;
 
-  void _toggleTheme() {
-    setState(() {
-      _themeMode =
-          _themeMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      AppIconService.instance.syncWithTheme(
+        isDarkMode: _themeMode == ThemeMode.dark,
+      );
     });
+  }
+
+  void _toggleTheme() {
+    final nextDark = _themeMode != ThemeMode.dark;
+    setState(() {
+      _themeMode = nextDark ? ThemeMode.dark : ThemeMode.light;
+    });
+    AppIconService.instance.syncWithTheme(isDarkMode: nextDark);
   }
 
   @override

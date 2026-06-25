@@ -47,11 +47,12 @@ class _ReasoningAccordionState extends State<ReasoningAccordion> {
     }
 
     final muted = DropColors.muted(context);
+    final showBody = _expanded || widget.isStreamingReasoning;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           GestureDetector(
             onTap: () => setState(() {
@@ -62,24 +63,7 @@ class _ReasoningAccordionState extends State<ReasoningAccordion> {
             child: Row(
               children: [
                 Text(
-                  widget.isStreamingReasoning ? 'ragionamento' : 'ragionamento',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        fontSize: 10,
-                        letterSpacing: 0.6,
-                        color: muted,
-                        fontWeight: FontWeight.w400,
-                      ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Container(
-                    height: 1,
-                    color: muted.withValues(alpha: 0.25),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  _expanded ? '—' : '+',
+                  _expanded ? '−' : '+',
                   style: TextStyle(
                     fontSize: 14,
                     color: muted,
@@ -87,22 +71,63 @@ class _ReasoningAccordionState extends State<ReasoningAccordion> {
                     height: 1,
                   ),
                 ),
+                const SizedBox(width: 6),
+                Text(
+                  'ragionamento',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        fontSize: 10,
+                        letterSpacing: 0.3,
+                        color: muted,
+                        fontWeight: FontWeight.w400,
+                      ),
+                ),
               ],
             ),
           ),
-          if (_expanded || widget.isStreamingReasoning) ...[
-            const SizedBox(height: 6),
-            Text(
-              widget.reasoning.isEmpty && widget.isStreamingReasoning
-                  ? '...'
-                  : widget.reasoning,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    fontSize: 11,
-                    height: 1.45,
-                    color: muted.withValues(alpha: 0.75),
-                  ),
-            ),
-          ],
+          AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topLeft,
+            child: showBody
+                ? Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          SizedBox(
+                            width: 14,
+                            child: Align(
+                              alignment: Alignment.topCenter,
+                              child: Container(
+                                width: 1,
+                                color: muted.withValues(alpha: 0.3),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              widget.reasoning.isEmpty &&
+                                      widget.isStreamingReasoning
+                                  ? '...'
+                                  : widget.reasoning,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    fontSize: 11,
+                                    height: 1.45,
+                                    color: muted.withValues(alpha: 0.75),
+                                  ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : const SizedBox(width: double.infinity, height: 0),
+          ),
         ],
       ),
     );

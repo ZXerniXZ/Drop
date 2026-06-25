@@ -120,10 +120,10 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
               onOpenChat: () => _openChatSheet(),
               enabled: !widget.note.isProcessing && !widget.note.isFailed,
               hintText: widget.note.isProcessing
-                  ? 'ANALISI IN CORSO...'
+                  ? 'Analisi in corso...'
                   : widget.note.isFailed
-                      ? 'ANALISI FALLITA'
-                      : 'ASK DROP ABOUT THIS NOTE...',
+                      ? 'Analisi fallita'
+                      : 'Chiedi a Drop su questa nota...',
             ),
           ],
         ),
@@ -348,11 +348,11 @@ class _ModeButton extends StatelessWidget {
               : null,
         ),
         child: Text(
-          label.toUpperCase(),
+          label,
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
                 fontSize: 11,
-                letterSpacing: 1.2,
-                fontWeight: isActive ? FontWeight.bold : FontWeight.w600,
+                letterSpacing: 0.2,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
                 color: isActive
                     ? Theme.of(context).colorScheme.onSurface
                     : DropColors.muted(context),
@@ -390,13 +390,13 @@ class _TabPill extends StatelessWidget {
           borderRadius: BorderRadius.circular(20),
         ),
         child: Text(
-          label.toUpperCase(),
+          label,
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
                 color: isActive
                     ? (isDark ? Colors.black : Colors.white)
                     : DropColors.muted(context),
                 fontSize: 11,
-                fontWeight: isActive ? FontWeight.bold : FontWeight.w600,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
               ),
         ),
       ),
@@ -423,7 +423,7 @@ class _MetadataCard extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text('DATE & TIME:', style: Theme.of(context).textTheme.labelSmall),
+          Text('Date & time', style: Theme.of(context).textTheme.labelSmall),
           Flexible(
             child: Text(
               dateTime,
@@ -467,7 +467,7 @@ class _HighlightsTab extends StatelessWidget {
             );
           },
           icon: const Icon(Icons.auto_awesome_outlined, size: 16),
-          label: const Text('GENERA MAPPA MENTALE'),
+          label: const Text('Genera mappa mentale'),
           style: OutlinedButton.styleFrom(
             padding: const EdgeInsets.symmetric(vertical: 14),
             side: BorderSide(color: DropColors.border(context)),
@@ -479,10 +479,8 @@ class _HighlightsTab extends StatelessWidget {
         ),
         const SizedBox(height: 24),
         Text(
-          'ACTION ITEMS',
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                letterSpacing: 1.6,
-              ),
+          'Action items',
+          style: Theme.of(context).textTheme.labelSmall,
         ),
         const SizedBox(height: 12),
         if (items.isEmpty)
@@ -562,10 +560,8 @@ class _SummaryTab extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(
-              'OVERVIEW SUMMARY',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    letterSpacing: 1.6,
-                  ),
+              'Overview summary',
+              style: Theme.of(context).textTheme.labelSmall,
             ),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -574,7 +570,7 @@ class _SummaryTab extends StatelessWidget {
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
-                'MEETING TEMPLATE',
+                'Meeting template',
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
                       fontSize: 9,
                     ),
@@ -670,7 +666,7 @@ class _SpeakerViewTab extends StatelessWidget {
                   Row(
                     children: [
                       Text(
-                        block.speaker.toUpperCase(),
+                        block.speaker,
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                               fontWeight: FontWeight.bold,
                               color: Theme.of(context).colorScheme.onSurface,
