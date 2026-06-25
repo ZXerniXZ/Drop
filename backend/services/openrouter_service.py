@@ -10,6 +10,15 @@ WHISPER_MODEL = "openai/whisper-large-v3"
 APP_REFERER = "https://github.com/ZXerniXZ/Drop"
 APP_TITLE = "Drop"
 
+LANGUAGE_CODES = {
+    "italian": "it",
+    "italiano": "it",
+    "english": "en",
+    "inglese": "en",
+    "automatic": None,
+    "automatico": None,
+}
+
 _FORMAT_MAP = {
     ".m4a": "m4a",
     ".mp3": "mp3",
@@ -26,7 +35,7 @@ def _audio_format(file_path: str) -> str:
     return _FORMAT_MAP.get(suffix, "m4a")
 
 
-async def transcribe_audio(file_path: str) -> str:
+async def transcribe_audio(file_path: str, language: str | None = None) -> str:
     if not OPENROUTER_API_KEY:
         raise ValueError("OPENROUTER_API_KEY is not configured")
 
@@ -47,6 +56,12 @@ async def transcribe_audio(file_path: str) -> str:
             "format": _audio_format(file_path),
         },
     }
+
+    if language:
+        lang_key = language.strip().lower()
+        lang_code = LANGUAGE_CODES.get(lang_key, lang_key if len(lang_key) == 2 else None)
+        if lang_code:
+            payload["language"] = lang_code
 
     async with httpx.AsyncClient(timeout=120.0) as client:
         response = await client.post(

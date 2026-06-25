@@ -18,7 +18,7 @@ class LocalDatabaseService {
 
     _db = await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE audio_notes (
@@ -32,7 +32,8 @@ class LocalDatabaseService {
             duration_seconds INTEGER NOT NULL DEFAULT 0,
             is_new INTEGER NOT NULL DEFAULT 0,
             tag TEXT NOT NULL DEFAULT 'Diario',
-            analysis_status TEXT NOT NULL DEFAULT 'ready'
+            analysis_status TEXT NOT NULL DEFAULT 'ready',
+            structured_json TEXT NOT NULL DEFAULT '{}'
           )
         ''');
       },
@@ -51,6 +52,11 @@ class LocalDatabaseService {
           );
           await db.execute(
             "ALTER TABLE audio_notes ADD COLUMN analysis_status TEXT NOT NULL DEFAULT 'ready'",
+          );
+        }
+        if (oldVersion < 4) {
+          await db.execute(
+            "ALTER TABLE audio_notes ADD COLUMN structured_json TEXT NOT NULL DEFAULT '{}'",
           );
         }
       },

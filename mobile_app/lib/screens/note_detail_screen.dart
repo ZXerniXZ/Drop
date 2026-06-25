@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../data/note_detail_mock_data.dart';
 import '../models/audio_note.dart';
+import '../models/note_structured_data.dart';
 import '../theme/drop_theme.dart';
 import '../widgets/note_detail/ask_ai_bar.dart';
 import '../widgets/note_detail/note_audio_player.dart';
@@ -174,12 +175,19 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
         const SizedBox(height: 20),
         switch (_subTab) {
           _NotesSubTab.highlights => _HighlightsTab(
+              highlights: widget.note.structuredData.highlights,
               checkedItems: _checkedItems,
               onToggle: (i, v) => setState(() => _checkedItems[i] = v),
             ),
           _NotesSubTab.summary => _SummaryTab(note: widget.note),
-          _NotesSubTab.speakerView => const _SpeakerViewTab(),
-          _NotesSubTab.keyData => const _KeyDataTab(),
+          _NotesSubTab.speakerView => _SpeakerViewTab(
+              blocks: widget.note.structuredData.speakerView,
+            ),
+          _NotesSubTab.keyData => _KeyDataTab(
+              location: widget.note.structuredData.location,
+              participants: widget.note.structuredData.participants,
+              tag: widget.note.tag.label,
+            ),
         },
       ],
     );
@@ -359,15 +367,21 @@ class _MetadataCard extends StatelessWidget {
 
 class _HighlightsTab extends StatelessWidget {
   const _HighlightsTab({
+    required this.highlights,
     required this.checkedItems,
     required this.onToggle,
   });
 
+  final List<String> highlights;
   final Map<int, bool> checkedItems;
   final void Function(int index, bool value) onToggle;
 
   @override
   Widget build(BuildContext context) {
+    final items = highlights.isNotEmpty
+        ? highlights
+        : NoteDetailMockData.actionItems.map((e) => e.text).toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -396,9 +410,15 @@ class _HighlightsTab extends StatelessWidget {
               ),
         ),
         const SizedBox(height: 12),
-        ...List.generate(NoteDetailMockData.actionItems.length, (i) {
-          final item = NoteDetailMockData.actionItems[i];
-          final checked = checkedItems[i] ?? item.checked;
+        if (items.isEmpty)
+          Text(
+            'Nessun highlight disponibile.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          )
+        else
+          ...List.generate(items.length, (i) {
+          final text = items[i];
+          final checked = checkedItems[i] ?? false;
 
           return Padding(
             padding: const EdgeInsets.only(bottom: 12),
@@ -429,40 +449,15 @@ class _HighlightsTab extends StatelessWidget {
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        item.text,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              fontSize: 13,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurface
-                                  .withValues(alpha: 0.9),
-                            ),
-                      ),
-                      const SizedBox(height: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 3,
+                  child: Text(
+                    text,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontSize: 13,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.9),
                         ),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).brightness == Brightness.dark
-                              ? Colors.white.withValues(alpha: 0.06)
-                              : Colors.black.withValues(alpha: 0.05),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          '[${item.time}] Jump to Audio',
-                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                fontSize: 9,
-                                letterSpacing: 0.4,
-                              ),
-                        ),
-                      ),
-                    ],
                   ),
                 ),
               ],
@@ -553,10 +548,24 @@ class _SummaryTab extends StatelessWidget {
 }
 
 class _SpeakerViewTab extends StatelessWidget {
-  const _SpeakerViewTab();
+  const _SpeakerViewTab({required this.blocks});
+
+  final List<SpeakerBlock> blocks;
 
   @override
   Widget build(BuildContext context) {
+    final displayBlocks = blocks.isNotEmpty
+        ? blocks
+        : NoteDetailMockData.speakerBlocks
+            .map(
+              (b) => SpeakerBlock(
+                speaker: b.speaker,
+                text: b.text,
+                time: b.time,
+              ),
+            )
+            .toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -575,7 +584,13 @@ class _SpeakerViewTab extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 20),
-        ...NoteDetailMockData.speakerBlocks.map((block) {
+        if (displayBlocks.isEmpty)
+          Text(
+            'Nessun blocco speaker disponibile.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          )
+        else
+          ...displayBlocks.map((block) {
           return Padding(
             padding: const EdgeInsets.only(bottom: 20),
             child: Container(
@@ -599,13 +614,15 @@ class _SpeakerViewTab extends StatelessWidget {
                               color: Theme.of(context).colorScheme.onSurface,
                             ),
                       ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '[${block.time}]',
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: DropColors.muted(context),
-                            ),
-                      ),
+                      if (block.time != null && block.time!.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Text(
+                          '[${block.time}]',
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                color: DropColors.muted(context),
+                              ),
+                        ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 8),
@@ -613,15 +630,11 @@ class _SpeakerViewTab extends StatelessWidget {
                     width: double.infinity,
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: block.isActive
-                          ? (Theme.of(context).brightness == Brightness.dark
-                              ? Colors.white.withValues(alpha: 0.06)
-                              : Colors.black.withValues(alpha: 0.04))
-                          : Colors.transparent,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.white.withValues(alpha: 0.06)
+                          : Colors.black.withValues(alpha: 0.04),
                       borderRadius: BorderRadius.circular(12),
-                      border: block.isActive
-                          ? Border.all(color: DropColors.border(context))
-                          : null,
+                      border: Border.all(color: DropColors.border(context)),
                     ),
                     child: Text(
                       block.text,
@@ -630,7 +643,7 @@ class _SpeakerViewTab extends StatelessWidget {
                             color: Theme.of(context)
                                 .colorScheme
                                 .onSurface
-                                .withValues(alpha: block.isActive ? 0.95 : 0.75),
+                                .withValues(alpha: 0.9),
                           ),
                     ),
                   ),
@@ -645,10 +658,25 @@ class _SpeakerViewTab extends StatelessWidget {
 }
 
 class _KeyDataTab extends StatelessWidget {
-  const _KeyDataTab();
+  const _KeyDataTab({
+    required this.location,
+    required this.participants,
+    required this.tag,
+  });
+
+  final String location;
+  final List<String> participants;
+  final String tag;
 
   @override
   Widget build(BuildContext context) {
+    final displayLocation =
+        location.isNotEmpty ? location : NoteDetailMockData.location;
+    final displayAttendees = participants.isNotEmpty
+        ? participants.join(', ')
+        : NoteDetailMockData.attendees;
+    final displayTag = tag.isNotEmpty ? tag : 'Diario';
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -663,7 +691,7 @@ class _KeyDataTab extends StatelessWidget {
         children: [
           _KeyDataRow(
             label: 'LOCATION:',
-            value: NoteDetailMockData.location,
+            value: displayLocation,
           ),
           const SizedBox(height: 16),
           const Divider(height: 1),
@@ -674,7 +702,7 @@ class _KeyDataTab extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            NoteDetailMockData.attendees,
+            displayAttendees,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   fontSize: 13,
                   color: Theme.of(context).colorScheme.onSurface,
@@ -683,7 +711,7 @@ class _KeyDataTab extends StatelessWidget {
           const SizedBox(height: 16),
           _KeyDataRow(
             label: 'TAG:',
-            value: 'Nota / Riunione',
+            value: displayTag,
           ),
         ],
       ),

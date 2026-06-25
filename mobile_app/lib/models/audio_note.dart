@@ -1,3 +1,5 @@
+import 'note_structured_data.dart';
+
 enum NoteTag {
   meeting('Meeting'),
   lezione('Lezione'),
@@ -45,6 +47,7 @@ class AudioNote {
     this.isNew = false,
     this.tag = NoteTag.diario,
     this.analysisStatus = NoteAnalysisStatus.ready,
+    this.structuredData = const NoteStructuredData(),
   });
 
   final String id;
@@ -58,6 +61,7 @@ class AudioNote {
   final bool isNew;
   final NoteTag tag;
   final NoteAnalysisStatus analysisStatus;
+  final NoteStructuredData structuredData;
 
   bool get isProcessing => analysisStatus.isProcessing;
 
@@ -102,6 +106,7 @@ class AudioNote {
     bool? isNew,
     NoteTag? tag,
     NoteAnalysisStatus? analysisStatus,
+    NoteStructuredData? structuredData,
   }) {
     return AudioNote(
       id: id ?? this.id,
@@ -115,6 +120,7 @@ class AudioNote {
       isNew: isNew ?? this.isNew,
       tag: tag ?? this.tag,
       analysisStatus: analysisStatus ?? this.analysisStatus,
+      structuredData: structuredData ?? this.structuredData,
     );
   }
 
@@ -132,6 +138,9 @@ class AudioNote {
       tag: NoteTag.fromString(map['tag'] as String?),
       analysisStatus:
           NoteAnalysisStatus.fromString(map['analysis_status'] as String?),
+      structuredData: NoteStructuredData.fromJsonString(
+        map['structured_json'] as String?,
+      ),
     );
   }
 
@@ -148,6 +157,7 @@ class AudioNote {
       'is_new': isNew ? 1 : 0,
       'tag': tag.label,
       'analysis_status': analysisStatus.dbValue,
+      'structured_json': structuredData.toJsonString(),
     };
   }
 }
