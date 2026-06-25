@@ -1,0 +1,628 @@
+import 'package:flutter/material.dart';
+
+import '../config/api_config.dart';
+import '../models/ai_preferences.dart';
+import '../services/app_preferences_service.dart';
+import '../services/audio_storage_service.dart';
+import '../services/local_database_service.dart';
+import '../services/server_health_service.dart';
+import '../services/usage_stats_service.dart';
+import '../theme/drop_theme.dart';
+
+class MyDataScreen extends StatefulWidget {
+  const MyDataScreen({super.key});
+
+  @override
+  State<MyDataScreen> createState() => _MyDataScreenState();
+}
+
+class _MyDataScreenState extends State<MyDataScreen> {
+  AiPreferences _aiPrefs = const AiPreferences();
+  UsageStats? _usage;
+  AudioStorageInfo? _storage;
+  ServerStatus _serverStatus = ServerStatus.checking;
+  bool _isLoading = true;
+  bool _isClearing = false;
+  final _promptController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAll();
+  }
+
+  @override
+  void dispose() {
+    _promptController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadAll() async {
+    setState(() {
+      _isLoading = true;
+      _serverStatus = ServerStatus.checking;
+    });
+
+    final notes = await LocalDatabaseService.instance.getAllNotes();
+    final prefs = await AppPreferencesService.instance.loadAiPreferences();
+    final storage = await AudioStorageService.getStorageInfo();
+    final server = await ServerHealthService.checkHealth();
+
+    if (!mounted) return;
+    _promptController.text = prefs.customPrompt;
+    setState(() {
+      _usage = UsageStatsService.compute(notes);
+      _aiPrefs = prefs;
+      _storage = storage;
+      _serverStatus = server;
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _saveAiPreferences(AiPreferences prefs) async {
+    await AppPreferencesService.instance.saveAiPreferences(prefs);
+    setState(() => _aiPrefs = prefs);
+  }
+
+  Future<void> _clearCache() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Svuota cache audio'),
+        content: const Text(
+          'Verranno eliminati tutti i file .m4a locali. '
+          'Trascrizioni e riepiloghi nel database restano intatti.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Annulla'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(
+              'Svuota',
+              style: TextStyle(color: DropColors.recordRed),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isClearing = true);
+    final deleted = await AudioStorageService.clearAudioCache();
+    final storage = await AudioStorageService.getStorageInfo();
+    if (!mounted) return;
+
+    setState(() {
+      _storage = storage;
+      _isClearing = false;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Eliminati $deleted file audio')),
+    );
+  }
+
+  void _exportBackup() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Esporta backup JSON — in arrivo')),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadAll,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+        children: [
+          _UsageCard(stats: _usage!),
+          const SizedBox(height: 16),
+          _AiSettingsCard(
+            prefs: _aiPrefs,
+            promptController: _promptController,
+            onChanged: _saveAiPreferences,
+          ),
+          const SizedBox(height: 16),
+          _StorageCard(
+            storage: _storage!,
+            isClearing: _isClearing,
+            onClearCache: _clearCache,
+            onExportBackup: _exportBackup,
+          ),
+          const SizedBox(height: 16),
+          _ServerStatusCard(status: _serverStatus),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionCard extends StatelessWidget {
+  const _SectionCard({
+    required this.icon,
+    required this.title,
+    required this.child,
+  });
+
+  final IconData icon;
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Theme.of(context).brightness == Brightness.dark
+            ? DropColors.darkSurface
+            : DropColors.lightSurface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: DropColors.border(context)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16),
+              const SizedBox(width: 10),
+              Text(
+                title.toUpperCase(),
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
+                    ),
+              ),
+            ],
+          ),
+          const Divider(height: 24),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _UsageCard extends StatelessWidget {
+  const _UsageCard({required this.stats});
+
+  final UsageStats stats;
+
+  @override
+  Widget build(BuildContext context) {
+    final minutesLabel = stats.minutesThisMonth >= 10
+        ? stats.minutesThisMonth.round().toString()
+        : stats.minutesThisMonth.toStringAsFixed(1);
+
+    return _SectionCard(
+      icon: Icons.pie_chart_outline,
+      title: 'Attività del mese',
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'MINUTI REGISTRATI',
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '$minutesLabel / ${stats.monthlyGoalMinutes} min',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w300,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${stats.notesThisMonth} note questo mese',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            fontSize: 12,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(
+                width: 56,
+                height: 56,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    CircularProgressIndicator(
+                      value: stats.progress.clamp(0.0, 1.0),
+                      strokeWidth: 3,
+                      backgroundColor: DropColors.border(context),
+                    ),
+                    Text(
+                      '${stats.progressPercent}%',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 10,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Divider(height: 1),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'COSTO API STIMATO',
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '\$${stats.estimatedApiCostUsd.toStringAsFixed(2)}',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ],
+              ),
+              Text(
+                'OBIETTIVO PERSONALE',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      fontSize: 9,
+                      color: DropColors.muted(context),
+                    ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AiSettingsCard extends StatelessWidget {
+  const _AiSettingsCard({
+    required this.prefs,
+    required this.promptController,
+    required this.onChanged,
+  });
+
+  final AiPreferences prefs;
+  final TextEditingController promptController;
+  final Future<void> Function(AiPreferences) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SectionCard(
+      icon: Icons.memory_outlined,
+      title: 'Intelligenza artificiale',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _FieldLabel(label: 'Modello di elaborazione'),
+          const SizedBox(height: 8),
+          _StyledDropdown<AiModel>(
+            value: prefs.model,
+            items: AiModel.values,
+            labelBuilder: (m) => m.label,
+            onChanged: (v) => onChanged(prefs.copyWith(model: v)),
+          ),
+          const SizedBox(height: 16),
+          _FieldLabel(label: 'Lingua trascrizione'),
+          const SizedBox(height: 8),
+          _StyledDropdown<TranscriptionLanguage>(
+            value: prefs.transcriptionLanguage,
+            items: TranscriptionLanguage.values,
+            labelBuilder: (l) => l.label,
+            onChanged: (v) => onChanged(prefs.copyWith(transcriptionLanguage: v)),
+          ),
+          const SizedBox(height: 16),
+          _FieldLabel(label: 'Prompt personalizzato'),
+          const SizedBox(height: 8),
+          TextField(
+            controller: promptController,
+            maxLines: 3,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 13),
+            decoration: InputDecoration(
+              hintText: 'Es: Traduci sempre in inglese, usa un tono formale...',
+              hintStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontSize: 12,
+                    color: DropColors.muted(context),
+                  ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: DropColors.border(context)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: DropColors.border(context)),
+              ),
+              filled: true,
+              fillColor: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.white.withValues(alpha: 0.02)
+                  : Colors.black.withValues(alpha: 0.02),
+            ),
+            onChanged: (v) => onChanged(prefs.copyWith(customPrompt: v)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StorageCard extends StatelessWidget {
+  const _StorageCard({
+    required this.storage,
+    required this.isClearing,
+    required this.onClearCache,
+    required this.onExportBackup,
+  });
+
+  final AudioStorageInfo storage;
+  final bool isClearing;
+  final VoidCallback onClearCache;
+  final VoidCallback onExportBackup;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SectionCard(
+      icon: Icons.storage_outlined,
+      title: 'Archiviazione',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Spazio occupato (audio)',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontSize: 13,
+                    ),
+              ),
+              Text(
+                storage.formattedSize,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${storage.fileCount} file .m4a',
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
+          const SizedBox(height: 16),
+          _ActionButton(
+            label: 'SVUOTA CACHE AUDIO',
+            icon: Icons.delete_outline,
+            isDestructive: true,
+            isLoading: isClearing,
+            onTap: onClearCache,
+          ),
+          const SizedBox(height: 10),
+          _ActionButton(
+            label: 'ESPORTA BACKUP JSON',
+            icon: Icons.download_outlined,
+            onTap: onExportBackup,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ServerStatusCard extends StatelessWidget {
+  const _ServerStatusCard({required this.status});
+
+  final ServerStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final isOnline = status == ServerStatus.online;
+    final isChecking = status == ServerStatus.checking;
+    final color = isChecking
+        ? Colors.orange
+        : isOnline
+            ? Colors.green
+            : DropColors.recordRed;
+    final label = isChecking
+        ? 'VERIFICA...'
+        : isOnline
+            ? 'ONLINE'
+            : 'OFFLINE';
+
+    return _SectionCard(
+      icon: Icons.wifi,
+      title: 'Stato server',
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Theme.of(context).brightness == Brightness.dark
+              ? Colors.white.withValues(alpha: 0.02)
+              : Colors.black.withValues(alpha: 0.02),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: DropColors.border(context)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'ENDPOINT ATTIVO',
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    productionApiBaseUrl.replaceFirst('https://', ''),
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          letterSpacing: 0.3,
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    label,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: color,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 9,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FieldLabel extends StatelessWidget {
+  const _FieldLabel({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      label.toUpperCase(),
+      style: Theme.of(context).textTheme.labelSmall,
+    );
+  }
+}
+
+class _StyledDropdown<T> extends StatelessWidget {
+  const _StyledDropdown({
+    required this.value,
+    required this.items,
+    required this.labelBuilder,
+    required this.onChanged,
+  });
+
+  final T value;
+  final List<T> items;
+  final String Function(T) labelBuilder;
+  final ValueChanged<T> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: DropColors.border(context)),
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Colors.white.withValues(alpha: 0.02)
+            : Colors.black.withValues(alpha: 0.02),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<T>(
+          value: value,
+          isExpanded: true,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 13),
+          items: items
+              .map(
+                (item) => DropdownMenuItem(
+                  value: item,
+                  child: Text(labelBuilder(item)),
+                ),
+              )
+              .toList(),
+          onChanged: (v) {
+            if (v != null) onChanged(v);
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionButton extends StatelessWidget {
+  const _ActionButton({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+    this.isDestructive = false,
+    this.isLoading = false,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool isDestructive;
+  final bool isLoading;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isDestructive ? DropColors.recordRed : null;
+
+    return OutlinedButton.icon(
+      onPressed: isLoading ? null : onTap,
+      icon: isLoading
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Icon(icon, size: 16, color: color),
+      label: Text(label),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: color,
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        side: BorderSide(
+          color: isDestructive
+              ? DropColors.recordRed.withValues(alpha: 0.3)
+              : DropColors.border(context),
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        textStyle: Theme.of(context).textTheme.labelSmall,
+      ),
+    );
+  }
+}
