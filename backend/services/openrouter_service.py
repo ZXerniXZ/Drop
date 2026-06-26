@@ -1,3 +1,4 @@
+import asyncio
 import base64
 from pathlib import Path
 
@@ -35,11 +36,9 @@ def _audio_format(file_path: str) -> str:
     return _FORMAT_MAP.get(suffix, "m4a")
 
 
-async def transcribe_audio(file_path: str, language: str | None = None) -> str:
-    if not OPENROUTER_API_KEY:
-        raise ValueError("OPENROUTER_API_KEY is not configured")
-
-    path = Path(file_path)
+def _build_transcription_payload(
+    path: Path, language: str | None
+) -> tuple[dict[str, str], dict]:
     audio_b64 = base64.b64encode(path.read_bytes()).decode("ascii")
 
     headers = {
@@ -49,11 +48,11 @@ async def transcribe_audio(file_path: str, language: str | None = None) -> str:
         "X-Title": APP_TITLE,
     }
 
-    payload = {
+    payload: dict = {
         "model": WHISPER_MODEL,
         "input_audio": {
             "data": audio_b64,
-            "format": _audio_format(file_path),
+            "format": _audio_format(str(path)),
         },
     }
 
@@ -62,6 +61,16 @@ async def transcribe_audio(file_path: str, language: str | None = None) -> str:
         lang_code = LANGUAGE_CODES.get(lang_key, lang_key if len(lang_key) == 2 else None)
         if lang_code:
             payload["language"] = lang_code
+
+    return headers, payload
+
+
+async def transcribe_audio(file_path: str, language: str | None = None) -> str:
+    if not OPENROUTER_API_KEY:
+        raise ValueError("OPENROUTER_API_KEY is not configured")
+
+    path = Path(file_path)
+    headers, payload = await asyncio.to_thread(_build_transcription_payload, path, language)
 
     timeout = httpx.Timeout(
         TRANSCRIPTION_TIMEOUT_SECONDS,

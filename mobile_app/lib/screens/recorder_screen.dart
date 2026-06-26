@@ -233,6 +233,8 @@ class _RecorderScreenState extends State<RecorderScreen> {
     required int durationSeconds,
   }) async {
     const pollInterval = Duration(seconds: 3);
+    const maxGatewayFailures = 20;
+    var gatewayFailures = 0;
     final minAttempts = 200;
     final durationBasedAttempts = ((durationSeconds * 2) / pollInterval.inSeconds)
         .ceil()
@@ -254,6 +256,21 @@ class _RecorderScreenState extends State<RecorderScreen> {
       }
 
       if (response.statusCode == 404) {
+        gatewayFailures = 0;
+        await Future<void>.delayed(pollInterval);
+        continue;
+      }
+
+      if (response.statusCode == 502 ||
+          response.statusCode == 503 ||
+          response.statusCode == 504) {
+        gatewayFailures++;
+        if (gatewayFailures >= maxGatewayFailures) {
+          throw Exception(
+            'Server temporaneamente non disponibile (${response.statusCode}). '
+            'Il backend potrebbe essere sovraccarico: riprova tra qualche minuto.',
+          );
+        }
         await Future<void>.delayed(pollInterval);
         continue;
       }
@@ -261,6 +278,8 @@ class _RecorderScreenState extends State<RecorderScreen> {
       if (response.statusCode != 200) {
         throw Exception('Polling fallito (${response.statusCode})');
       }
+
+      gatewayFailures = 0;
 
       final job = jsonDecode(response.body) as Map<String, dynamic>;
       final status = job['status'] as String?;
