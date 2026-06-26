@@ -5,6 +5,7 @@ import '../models/record_orb_style.dart';
 import '../theme/drop_gradients.dart';
 import '../theme/drop_motion.dart';
 import '../theme/drop_theme.dart';
+import 'siri_lottie_orb.dart';
 import 'siri_record_orb.dart';
 
 enum DropNavTab { file, settings }
@@ -311,24 +312,19 @@ class _RecordingControlClusterState extends State<_RecordingControlCluster>
                 expand: expand,
                 offset: -58,
                 icon: widget.isPaused ? Icons.play_arrow_rounded : Icons.pause_rounded,
-                label: widget.isPaused ? 'Riprendi' : 'Pausa',
                 onTap: () {
                   HapticFeedback.lightImpact();
                   widget.onPauseResume();
                 },
-                isDark: isDark,
               ),
               _SatelliteButton(
                 expand: expand,
                 offset: 58,
                 icon: Icons.close_rounded,
-                label: 'Annulla',
                 onTap: () {
                   HapticFeedback.lightImpact();
                   widget.onCancel();
                 },
-                isDark: isDark,
-                isDestructive: true,
               ),
               GestureDetector(
                 onTapDown: (_) => setState(() => _orbPressed = true),
@@ -369,19 +365,28 @@ class _RecordingControlClusterState extends State<_RecordingControlCluster>
                         child: DecoratedBox(
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: isDark
-                                ? DropColors.darkSurface
-                                : DropColors.lightSurface,
+                            color: active
+                                ? Colors.transparent
+                                : (isDark
+                                    ? DropColors.darkSurface
+                                    : DropColors.lightSurface),
                           ),
                           child: Center(
-                            child: SiriRecordOrb(
-                              size: 48,
-                              style: widget.orbStyle,
+                            child: SiriOrbSwitcher(
+                              isActive: active,
                               isRecording: widget.isRecording,
-                              amplitude: amp,
-                              phase: phase,
-                              breath: breath,
+                              audioLevel: amp,
                               isDark: isDark,
+                              size: active ? 56 : 48,
+                              idleChild: SiriRecordOrb(
+                                size: 48,
+                                style: widget.orbStyle,
+                                isRecording: false,
+                                amplitude: 0,
+                                phase: phase,
+                                breath: breath,
+                                isDark: isDark,
+                              ),
                             ),
                           ),
                         ),
@@ -421,27 +426,20 @@ class _SatelliteButton extends StatelessWidget {
     required this.expand,
     required this.offset,
     required this.icon,
-    required this.label,
     required this.onTap,
-    required this.isDark,
-    this.isDestructive = false,
   });
 
   final double expand;
   final double offset;
   final IconData icon;
-  final String label;
   final VoidCallback onTap;
-  final bool isDark;
-  final bool isDestructive;
 
   @override
   Widget build(BuildContext context) {
     final t = expand.clamp(0.0, 1.0);
     final dx = offset * t;
-    final scale = 0.4 + t * 0.6;
-    final accent =
-        isDestructive ? DropColors.recordRed : Theme.of(context).colorScheme.onSurface;
+    final scale = 0.5 + t * 0.5;
+    final color = Theme.of(context).colorScheme.onSurface;
 
     return Positioned(
       child: Transform.translate(
@@ -452,37 +450,10 @@ class _SatelliteButton extends StatelessWidget {
             opacity: t,
             child: GestureDetector(
               onTap: t > 0.8 ? onTap : null,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: isDark ? DropColors.darkSurface : DropColors.lightSurface,
-                      border: Border.all(
-                        color: isDestructive
-                            ? DropColors.recordRed.withValues(alpha: 0.45)
-                            : DropColors.border(context),
-                        width: isDestructive ? 1.5 : 1,
-                      ),
-                    ),
-                    child: Icon(
-                      icon,
-                      size: 22,
-                      color: accent,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    label,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                ],
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Icon(icon, size: 28, color: color),
               ),
             ),
           ),
