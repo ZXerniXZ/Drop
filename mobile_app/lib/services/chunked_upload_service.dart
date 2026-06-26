@@ -23,6 +23,7 @@ class ChunkedUploadService {
     required String accessToken,
     required AiPreferences prefs,
     required List<String> availableTags,
+    String? noteId,
     String? existingUploadSessionId,
     int? lastUploadedChunkIndex,
     UploadProgressCallback? onProgress,
@@ -66,6 +67,7 @@ class ChunkedUploadService {
         totalChunks: totalChunks,
         prefs: prefs,
         availableTags: availableTags,
+        noteId: noteId,
       );
       await onSessionProgress?.call(uploadId, -1);
       startChunk = 0;
@@ -106,6 +108,7 @@ class ChunkedUploadService {
     required int totalChunks,
     required AiPreferences prefs,
     required List<String> availableTags,
+    String? noteId,
   }) async {
     final url = await ApiUrlResolver.resolveEndpoint('/upload-audio/sessions');
     final body = <String, dynamic>{
@@ -116,6 +119,9 @@ class ChunkedUploadService {
       'language': prefs.transcriptionLanguage.name,
       'available_tags': availableTags,
     };
+    if (noteId != null && noteId.isNotEmpty) {
+      body['note_id'] = noteId;
+    }
     if (prefs.customPrompt.trim().isNotEmpty) {
       body['custom_prompt'] = prefs.customPrompt.trim();
     }

@@ -328,6 +328,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
       request.fields['ai_model'] = prefs.model.openRouterId;
       request.fields['language'] = prefs.transcriptionLanguage.name;
       request.fields['available_tags'] = jsonEncode(tags);
+      request.fields['note_id'] = placeholder.id;
       if (prefs.customPrompt.trim().isNotEmpty) {
         request.fields['custom_prompt'] = prefs.customPrompt.trim();
       }
@@ -359,6 +360,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
         accessToken: accessToken,
         prefs: prefs,
         availableTags: tags,
+        noteId: placeholder.id,
         existingUploadSessionId: placeholder.uploadSessionId,
         lastUploadedChunkIndex: placeholder.uploadedChunks > 0
             ? placeholder.uploadedChunks - 1

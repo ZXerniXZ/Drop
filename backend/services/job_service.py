@@ -103,12 +103,30 @@ def _save_note_to_db(
     saved_name: str,
     transcription: str,
     processed: dict[str, Any],
+    *,
+    note_id: str | None = None,
 ) -> str:
-    note_id = str(uuid.uuid4())
+    resolved_id = (note_id or "").strip() or str(uuid.uuid4())
     db = _with_db()
     try:
+        existing = db.get(NoteDB, resolved_id)
+        if existing is not None:
+            if existing.user_id != user_id:
+                raise PermissionError("Note id already belongs to another user")
+            existing.title = processed["title"]
+            existing.summary = processed["summary"]
+            existing.formatted_transcription = processed["formatted_transcript"]
+            existing.raw_transcription = transcription
+            existing.highlights = processed["highlights"]
+            existing.key_data = processed["key_data"]
+            existing.speaker_view = processed["speaker_view"]
+            existing.audio_filename = saved_name
+            db.add(existing)
+            db.commit()
+            return resolved_id
+
         note = NoteDB(
-            id=note_id,
+            id=resolved_id,
             user_id=user_id,
             title=processed["title"],
             summary=processed["summary"],
@@ -121,7 +139,7 @@ def _save_note_to_db(
         )
         db.add(note)
         db.commit()
-        return note_id
+        return resolved_id
     except Exception:
         db.rollback()
         raise
@@ -133,6 +151,7 @@ async def run_upload_job(
     job_id: str,
     *,
     user_id: str,
+    note_id: str | None,
     file_path: str,
     saved_name: str,
     ai_model: str | None,
@@ -162,7 +181,13 @@ async def run_upload_job(
             language=language,
             available_tags=available_tags,
         )
-        note_id = _save_note_to_db(user_id, saved_name, transcription, processed)
+        note_id = _save_note_to_db(
+            user_id,
+            saved_name,
+            transcription,
+            processed,
+            note_id=note_id,
+        )
         result = {
             "success": True,
             "note_id": note_id,
@@ -198,6 +223,7 @@ def start_upload_job(
     job_id: str,
     *,
     user_id: str,
+    note_id: str | None,
     file_path: str,
     saved_name: str,
     ai_model: str | None,
@@ -210,6 +236,7 @@ def start_upload_job(
         run_upload_job(
             job_id,
             user_id=user_id,
+            note_id=note_id,
             file_path=file_path,
             saved_name=saved_name,
             ai_model=ai_model,

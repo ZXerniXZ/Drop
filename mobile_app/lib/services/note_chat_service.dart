@@ -179,9 +179,21 @@ class NoteChatService {
 
       if (response.statusCode != 200) {
         final errorBody = await response.stream.bytesToString();
-        yield ChatStreamError(
-          'Errore server (${response.statusCode}): $errorBody',
-        );
+        String message = 'Errore server (${response.statusCode})';
+        try {
+          final parsed = jsonDecode(errorBody) as Map<String, dynamic>;
+          final detail = parsed['detail'];
+          if (detail != null) {
+            message = detail.toString();
+          }
+        } catch (_) {
+          if (errorBody.isNotEmpty) {
+            message = errorBody.length > 160
+                ? '${errorBody.substring(0, 160)}...'
+                : errorBody;
+          }
+        }
+        yield ChatStreamError(message);
         return;
       }
 

@@ -49,6 +49,7 @@ class UploadSessionCreate(BaseModel):
     filename: str = "audio.m4a"
     total_size: int = Field(gt=0)
     total_chunks: int = Field(gt=0)
+    note_id: str | None = None
     ai_model: str | None = None
     language: str | None = None
     custom_prompt: str | None = None
@@ -75,6 +76,7 @@ def _parse_tags_list(available_tags: str | None) -> list[str] | None:
 
 def _metadata_from_body(body: UploadSessionCreate) -> dict[str, Any]:
     return {
+        "note_id": body.note_id,
         "ai_model": body.ai_model,
         "language": body.language,
         "custom_prompt": body.custom_prompt,
@@ -155,6 +157,7 @@ async def complete_upload_session(
     start_upload_job(
         job_id,
         user_id=current_user_id,
+        note_id=metadata.get("note_id"),
         file_path=file_path,
         saved_name=saved_name,
         ai_model=metadata.get("ai_model"),
@@ -187,6 +190,7 @@ async def upload_audio(
     language: str | None = Form(default=None),
     custom_prompt: str | None = Form(default=None),
     available_tags: str | None = Form(default=None),
+    note_id: str | None = Form(default=None),
 ):
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -210,6 +214,7 @@ async def upload_audio(
     start_upload_job(
         job_id,
         user_id=current_user_id,
+        note_id=note_id,
         file_path=str(destination),
         saved_name=saved_name,
         ai_model=ai_model,
@@ -271,7 +276,9 @@ async def chat_note_stream(
     current_user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _get_owned_note(db, request.note_id, current_user_id)
+    note = db.get(NoteDB, request.note_id)
+    if note is not None and note.user_id != current_user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
     return StreamingResponse(
         stream_note_chat(request),
         media_type="text/event-stream",
