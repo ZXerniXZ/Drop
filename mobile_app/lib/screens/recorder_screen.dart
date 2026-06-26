@@ -115,9 +115,9 @@ class _RecorderScreenState extends State<RecorderScreen> {
   }
 
   double _normalizeAmplitude(double db) {
-    if (db <= -60) return 0;
-    if (db >= 0) return 1;
-    return (db + 60) / 60;
+    if (db <= -52) return 0;
+    if (db >= -12) return 1;
+    return ((db + 52) / 40).clamp(0.0, 1.0);
   }
 
   Future<void> _loadNotes() async {

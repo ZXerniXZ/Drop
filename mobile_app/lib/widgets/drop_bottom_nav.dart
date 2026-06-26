@@ -1,3 +1,5 @@
+import 'dart:ui' show lerpDouble;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -6,7 +8,6 @@ import '../theme/drop_gradients.dart';
 import '../theme/drop_motion.dart';
 import '../theme/drop_theme.dart';
 import 'siri_lottie_orb.dart';
-import 'siri_record_orb.dart';
 
 enum DropNavTab { file, settings }
 
@@ -212,9 +213,9 @@ class _RecordingControlCluster extends StatefulWidget {
 
 class _RecordingControlClusterState extends State<_RecordingControlCluster>
     with TickerProviderStateMixin {
+  final GlobalKey<SiriLottieOrbState> _orbKey = GlobalKey<SiriLottieOrbState>();
   late final AnimationController _expandController;
   late final AnimationController _breathController;
-  late final AnimationController _waveController;
   late final Animation<double> _expand;
   late final Animation<double> _breath;
   double _displayAmp = 0;
@@ -225,20 +226,16 @@ class _RecordingControlClusterState extends State<_RecordingControlCluster>
     super.initState();
     _expandController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 380),
+      duration: const Duration(milliseconds: 520),
     );
     _breathController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2200),
     )..repeat(reverse: true);
-    _waveController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1800),
-    );
     _expand = CurvedAnimation(
       parent: _expandController,
-      curve: DropMotion.spring,
-      reverseCurve: DropMotion.exit,
+      curve: Curves.easeInOutCubic,
+      reverseCurve: Curves.easeInOutCubic,
     );
     _breath = CurvedAnimation(
       parent: _breathController,
@@ -246,7 +243,6 @@ class _RecordingControlClusterState extends State<_RecordingControlCluster>
     );
     if (widget.isRecording || widget.isPaused) {
       _expandController.value = 1;
-      if (widget.isRecording) _waveController.repeat();
     }
   }
 
@@ -258,16 +254,20 @@ class _RecordingControlClusterState extends State<_RecordingControlCluster>
 
     if (active && !wasActive) {
       _expandController.forward();
+      if (widget.isRecording) {
+        _orbKey.currentState?.setAudioLevel(widget.amplitudeLevel);
+      }
     } else if (!active && wasActive) {
       _expandController.reverse();
     }
 
-    if (widget.isRecording && !oldWidget.isRecording) {
-      _waveController.repeat();
-    } else if (!widget.isRecording && oldWidget.isRecording) {
-      _waveController.stop();
-      _waveController.reset();
+    if (!widget.isRecording && oldWidget.isRecording) {
       _displayAmp = 0;
+      _orbKey.currentState?.setAudioLevel(0);
+    } else if (widget.isRecording &&
+        widget.amplitudeLevel != oldWidget.amplitudeLevel) {
+      _orbKey.currentState?.setAudioLevel(widget.amplitudeLevel);
+      _displayAmp += (widget.amplitudeLevel - _displayAmp) * 0.22;
     }
   }
 
@@ -275,42 +275,44 @@ class _RecordingControlClusterState extends State<_RecordingControlCluster>
   void dispose() {
     _expandController.dispose();
     _breathController.dispose();
-    _waveController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final active = widget.isRecording || widget.isPaused;
 
     return AnimatedBuilder(
-      animation: Listenable.merge([
-        _expandController,
-        _breathController,
-        _waveController,
-      ]),
+      animation: active
+          ? _expandController
+          : Listenable.merge([_expandController, _breathController]),
       builder: (context, child) {
-        _displayAmp += (widget.amplitudeLevel - _displayAmp) * 0.22;
-        final expand = _expand.value;
-        final breath = _breath.value;
-        final phase = _waveController.value;
+        final expand = _expand.value.clamp(0.0, 1.0);
+        final breath = active ? 0.0 : _breath.value;
+        if (widget.isRecording) {
+          _displayAmp += (widget.amplitudeLevel - _displayAmp) * 0.28;
+          _orbKey.currentState?.setAudioLevel(widget.amplitudeLevel);
+        }
         final amp = widget.isRecording ? _displayAmp : 0.0;
-        final glow = DropGradients.chatGlow(
-          active ? 0.7 + amp * 0.3 : 0.35 + breath * 0.2,
-          pulse: breath * 0.4,
-        );
+        final orbShell = lerpDouble(68, 92, expand)!;
+        final orbContent = lerpDouble(52, 60, expand)!;
+        final satelliteSpan = lerpDouble(62, 76, expand)!;
+        final glow = active
+            ? DropGradients.chatGlow(0.7 + amp.clamp(0.0, 0.7) * 0.3)
+            : const <BoxShadow>[];
 
         return SizedBox(
-          width: 64 + expand * 120,
-          height: widget.elapsedLabel != null ? 84 : 72,
+          width: orbShell + expand * 120,
+          height: widget.elapsedLabel != null
+              ? lerpDouble(88, 102, expand)!
+              : lerpDouble(76, 92, expand)!,
           child: Stack(
             clipBehavior: Clip.none,
             alignment: Alignment.center,
             children: [
               _SatelliteButton(
                 expand: expand,
-                offset: -58,
+                offset: -satelliteSpan,
                 icon: widget.isPaused ? Icons.play_arrow_rounded : Icons.pause_rounded,
                 onTap: () {
                   HapticFeedback.lightImpact();
@@ -319,7 +321,7 @@ class _RecordingControlClusterState extends State<_RecordingControlCluster>
               ),
               _SatelliteButton(
                 expand: expand,
-                offset: 58,
+                offset: satelliteSpan,
                 icon: Icons.close_rounded,
                 onTap: () {
                   HapticFeedback.lightImpact();
@@ -342,54 +344,20 @@ class _RecordingControlClusterState extends State<_RecordingControlCluster>
                 child: AnimatedScale(
                   scale: _orbPressed ? 0.94 : 1.0,
                   duration: DropMotion.fast,
-                  child: Transform.scale(
-                    scale: widget.isRecording ? 1.0 + amp * 0.06 : 1.0,
-                    child: Container(
-                      width: 64,
-                      height: 64,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        boxShadow: glow,
-                      ),
-                      child: Container(
-                        margin: const EdgeInsets.all(2),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: DropGradients.chatSweep(
-                            rotation: phase,
-                            intensity: active ? 0.9 : 0.5 + breath * 0.2,
-                            isDark: isDark,
-                          ),
-                        ),
-                        padding: const EdgeInsets.all(2),
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: active
-                                ? Colors.transparent
-                                : (isDark
-                                    ? DropColors.darkSurface
-                                    : DropColors.lightSurface),
-                          ),
-                          child: Center(
-                            child: SiriOrbSwitcher(
-                              isActive: active,
-                              isRecording: widget.isRecording,
-                              audioLevel: amp,
-                              isDark: isDark,
-                              size: active ? 56 : 48,
-                              idleChild: SiriRecordOrb(
-                                size: 48,
-                                style: widget.orbStyle,
-                                isRecording: false,
-                                amplitude: 0,
-                                phase: phase,
-                                breath: breath,
-                                isDark: isDark,
-                              ),
-                            ),
-                          ),
-                        ),
+                  child: Container(
+                    width: orbShell,
+                    height: orbShell,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      boxShadow: glow,
+                    ),
+                    child: Center(
+                      child: SiriOrbMorph(
+                        orbKey: _orbKey,
+                        expand: expand,
+                        isSessionActive: active,
+                        breath: breath,
+                        size: orbContent,
                       ),
                     ),
                   ),
@@ -399,7 +367,7 @@ class _RecordingControlClusterState extends State<_RecordingControlCluster>
                 Positioned(
                   bottom: 0,
                   child: Opacity(
-                    opacity: expand,
+                    opacity: expand.clamp(0.0, 1.0),
                     child: Text(
                       widget.elapsedLabel!,
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
