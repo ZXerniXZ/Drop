@@ -4,6 +4,7 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 
 import '../models/record_orb_style.dart';
+import '../theme/drop_gradients.dart';
 import '../theme/drop_theme.dart';
 
 class SiriRecordOrb extends StatelessWidget {
@@ -205,30 +206,17 @@ class _RecordOrbPainter extends CustomPainter {
     canvas.rotate(phase * math.pi * 2);
 
     final outer = Paint()
-      ..shader = SweepGradient(
-        colors: [
-          const Color(0xFFFF4D4F),
-          const Color(0xFFFF6B9D),
-          const Color(0xFF9B6BFF),
-          const Color(0xFF5B8CFF),
-          const Color(0xFFFF8A65),
-          const Color(0xFFFF4D4F),
-        ],
-        transform: GradientRotation(phase * math.pi),
+      ..shader = DropGradients.chatSweep(
+        rotation: phase,
+        intensity: isRecording ? 0.85 + amp * 0.15 : 0.55 + breath * 0.25,
+        isDark: isDark,
       ).createShader(Rect.fromCircle(center: Offset.zero, radius: orbR * 1.2));
-    canvas.drawCircle(Offset.zero, orbR * 1.15, outer);
+    canvas.drawCircle(Offset.zero, orbR * 1.12, outer);
 
     canvas.rotate(-phase * math.pi * 1.4);
     final mid = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          Colors.white.withValues(alpha: 0.55),
-          const Color(0xFFFF6B6D).withValues(alpha: 0.9),
-          const Color(0xFF7C5CFF).withValues(alpha: 0.7),
-          Colors.transparent,
-        ],
-        stops: const [0.0, 0.35, 0.65, 1.0],
-      ).createShader(Rect.fromCircle(center: Offset.zero, radius: orbR));
+      ..shader = DropGradients.chatOrbCore(amp: amp)
+          .createShader(Rect.fromCircle(center: Offset.zero, radius: orbR));
     canvas.drawCircle(Offset.zero, orbR, mid);
 
     canvas.restore();
@@ -239,7 +227,7 @@ class _RecordOrbPainter extends CustomPainter {
         final paint = Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.2
-          ..color = const Color(0xFF9B6BFF).withValues(alpha: (1 - ripple) * amp * 0.35);
+          ..color = DropGradients.chat[1].withValues(alpha: (1 - ripple) * amp * 0.35);
         canvas.drawCircle(center, orbR * (1.0 + ripple * 0.7), paint);
       }
     }

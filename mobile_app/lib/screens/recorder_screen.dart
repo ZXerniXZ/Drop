@@ -30,7 +30,6 @@ import '../widgets/note_filter_bar.dart';
 import '../widgets/drop_bottom_nav.dart';
 import '../widgets/drop_logo.dart';
 import '../widgets/note_list_card.dart';
-import '../widgets/recording_banner.dart';
 import '../widgets/staggered_entrance.dart';
 import 'note_detail_screen.dart';
 import 'my_data_screen.dart';
@@ -58,12 +57,13 @@ class _RecorderScreenState extends State<RecorderScreen> {
   NoteFilters _filters = const NoteFilters();
   DropNavTab _activeTab = DropNavTab.file;
   bool _isRecording = false;
+  bool _isPaused = false;
   bool _isLoadingNotes = true;
   bool _filtersVisible = false;
   List<String> _availableTags = NoteTagsConfig.defaultTags;
   Duration _elapsed = Duration.zero;
   double _amplitudeLevel = 0;
-  RecordOrbStyle _orbStyle = RecordOrbStyle.radialBars;
+  RecordOrbStyle _orbStyle = RecordOrbStyle.gradientFluid;
   Timer? _timer;
   StreamSubscription<Amplitude>? _amplitudeSub;
   String? _currentPath;
@@ -109,7 +109,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
   }
 
   void _onForegroundTaskData(Object data) {
-    if (data is Map && data['action'] == 'stop' && _isRecording) {
+    if (data is Map && data['action'] == 'stop' && (_isRecording || _isPaused)) {
       _stopRecording();
     }
   }
@@ -434,12 +434,35 @@ class _RecorderScreenState extends State<RecorderScreen> {
     setState(() => _notes.removeWhere((n) => n.id == note.id));
   }
 
-  Future<void> _toggleRecording() async {
-    if (_isRecording) {
-      await _stopRecording();
-    } else {
-      await _startRecording();
+  Future<void> _togglePauseResume() async {
+    if (_isPaused) {
+      await _recorder.resume();
+      if (!mounted) return;
+      setState(() {
+        _isPaused = false;
+        _isRecording = true;
+      });
+      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) return;
+        setState(() => _elapsed += const Duration(seconds: 1));
+        RecordingForegroundService.updateElapsed(_formatDuration(_elapsed));
+      });
+      return;
     }
+
+    if (!_isRecording) return;
+
+    await _recorder.pause();
+    _timer?.cancel();
+    if (!mounted) return;
+    setState(() {
+      _isPaused = true;
+      _isRecording = false;
+      _amplitudeLevel = 0;
+    });
+    await RecordingForegroundService.updateElapsed(
+      'In pausa · ${_formatDuration(_elapsed)}',
+    );
   }
 
   Future<void> _startRecording() async {
@@ -471,6 +494,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
 
     setState(() {
       _isRecording = true;
+      _isPaused = false;
       _elapsed = Duration.zero;
       _amplitudeLevel = 0;
       _currentPath = path;
@@ -489,12 +513,17 @@ class _RecorderScreenState extends State<RecorderScreen> {
     await _amplitudeSub?.cancel();
     _amplitudeSub = null;
 
+    if (_isPaused) {
+      await _recorder.resume();
+    }
+
     final recordedDuration = _elapsed;
     final path = await _recorder.stop();
     await RecordingForegroundService.stop();
 
     setState(() {
       _isRecording = false;
+      _isPaused = false;
       _elapsed = Duration.zero;
       _amplitudeLevel = 0;
     });
@@ -531,6 +560,60 @@ class _RecorderScreenState extends State<RecorderScreen> {
       filePath: savedPath,
       durationSeconds: recordedDuration.inSeconds,
     ));
+  }
+
+  Future<void> _cancelRecording() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Annulla registrazione'),
+        content: const Text('Vuoi scartare questa registrazione?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Continua'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(
+              'Annulla',
+              style: TextStyle(color: DropColors.recordRed),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    _timer?.cancel();
+    _timer = null;
+    await _amplitudeSub?.cancel();
+    _amplitudeSub = null;
+
+    if (_isPaused) {
+      await _recorder.resume();
+    }
+
+    final path = await _recorder.stop();
+    await RecordingForegroundService.stop();
+
+    final toDelete = path ?? _currentPath;
+    if (toDelete != null) {
+      try {
+        final file = File(toDelete);
+        if (await file.exists()) await file.delete();
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _isRecording = false;
+      _isPaused = false;
+      _elapsed = Duration.zero;
+      _amplitudeLevel = 0;
+      _currentPath = null;
+    });
   }
 
   Future<void> _retryAnalysis(AudioNote note) async {
@@ -602,11 +685,6 @@ class _RecorderScreenState extends State<RecorderScreen> {
           children: [
             _buildHeader(context),
             if (_activeTab == DropNavTab.file) _buildFiltersSection(context),
-            if (_isRecording && _activeTab == DropNavTab.file)
-              RecordingBanner(
-                elapsedLabel: _formatDuration(_elapsed),
-                onStop: _stopRecording,
-              ),
             Expanded(
               child: AnimatedSwitcher(
                 duration: DropMotion.medium,
@@ -629,8 +707,15 @@ class _RecorderScreenState extends State<RecorderScreen> {
                   _loadOrbStyle();
                 }
               },
-              onRecordTap: _toggleRecording,
+              onStartRecording: _startRecording,
+              onPauseResume: _togglePauseResume,
+              onFinishRecording: _stopRecording,
+              onCancelRecording: _cancelRecording,
               isRecording: _isRecording,
+              isPaused: _isPaused,
+              elapsedLabel: (_isRecording || _isPaused)
+                  ? _formatDuration(_elapsed)
+                  : null,
               amplitudeLevel: _amplitudeLevel,
               orbStyle: _orbStyle,
               onOrbPreview: _openOrbPreview,

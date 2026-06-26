@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../theme/drop_gradients.dart';
 import '../../theme/drop_theme.dart';
 
 class AskAiBar extends StatefulWidget {
@@ -102,65 +103,16 @@ class _AskAiBarState extends State<AskAiBar> with TickerProviderStateMixin {
     double rotation,
     bool focused,
   ) {
-    final angle = rotation * 2 * math.pi;
-    final idleA = isDark
-        ? Colors.white.withValues(alpha: 0.28)
-        : Colors.black.withValues(alpha: 0.14);
-    final idleB = isDark
-        ? Colors.white.withValues(alpha: 0.06)
-        : Colors.black.withValues(alpha: 0.04);
-
-    if (!focused || reveal < 1.0) {
-      final t = focused ? reveal : 0.0;
-      return SweepGradient(
-        transform: GradientRotation(angle),
-        colors: [
-          Color.lerp(idleA, const Color(0xFF5B8CFF), t)!,
-          Color.lerp(idleB, const Color(0xFF9B59FF), t)!,
-          Color.lerp(idleA, const Color(0xFF38BDF8), t)!,
-          Color.lerp(idleB, const Color(0xFF7C3AED), t)!,
-        ],
-        stops: const [0.0, 0.33, 0.66, 1.0],
-      );
-    }
-
-    return SweepGradient(
-      transform: GradientRotation(angle),
-      colors: const [
-        Color(0xFF5B8CFF),
-        Color(0xFF9B59FF),
-        Color(0xFF38BDF8),
-        Color(0xFF7C3AED),
-        Color(0xFF5B8CFF),
-      ],
-      stops: const [0.0, 0.25, 0.5, 0.75, 1.0],
+    final t = focused ? reveal : 0.0;
+    return DropGradients.chatSweep(
+      rotation: rotation,
+      intensity: focused ? math.max(t, 0.35) : t,
+      isDark: isDark,
     );
   }
 
-  List<BoxShadow> _outerGlow(double reveal, double pulse) {
-    final intensity = (reveal * 0.85 + pulse * 0.35).clamp(0.0, 1.0);
-    if (intensity <= 0.02) return const [];
-
-    return [
-      BoxShadow(
-        color: const Color(0xFF6366F1).withValues(alpha: 0.22 * intensity),
-        blurRadius: 28 + pulse * 14,
-        spreadRadius: 1 + pulse * 3,
-      ),
-      BoxShadow(
-        color: const Color(0xFF38BDF8).withValues(alpha: 0.16 * intensity),
-        blurRadius: 36 + pulse * 10,
-        spreadRadius: -2,
-        offset: Offset(-4 - pulse * 2, 0),
-      ),
-      BoxShadow(
-        color: const Color(0xFFA855F7).withValues(alpha: 0.18 * intensity),
-        blurRadius: 32 + pulse * 12,
-        spreadRadius: -1,
-        offset: Offset(4 + pulse * 2, 2),
-      ),
-    ];
-  }
+  List<BoxShadow> _outerGlow(double reveal, double pulse) =>
+      DropGradients.chatGlow(reveal, pulse: pulse);
 
   @override
   Widget build(BuildContext context) {

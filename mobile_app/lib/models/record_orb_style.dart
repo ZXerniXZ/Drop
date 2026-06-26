@@ -31,10 +31,10 @@ enum RecordOrbStyle {
   final String description;
 
   static RecordOrbStyle fromId(String? id) {
-    if (id == null) return RecordOrbStyle.radialBars;
+    if (id == null) return RecordOrbStyle.gradientFluid;
     return RecordOrbStyle.values.firstWhere(
       (s) => s.id == id,
-      orElse: () => RecordOrbStyle.radialBars,
+      orElse: () => RecordOrbStyle.gradientFluid,
     );
   }
 }
