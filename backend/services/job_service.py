@@ -5,8 +5,8 @@ from typing import Any
 
 from database import SessionLocal
 from models.note import NoteDB
+from services.audio_segmentation_service import transcribe_audio_long
 from services.llm_service import process_transcript
-from services.openrouter_service import transcribe_audio
 
 _jobs: dict[str, dict[str, Any]] = {}
 _MAX_JOBS = 200
@@ -32,11 +32,26 @@ def create_job(job_id: str, *, user_id: str) -> None:
         "result": None,
         "error": None,
         "note_id": None,
+        "phase": "transcribing",
+        "progress": None,
     }
 
 
 def get_job(job_id: str) -> dict[str, Any] | None:
     return _jobs.get(job_id)
+
+
+def _update_job_progress(
+    job_id: str, *, phase: str, current: int | None = None, total: int | None = None
+) -> None:
+    job = _jobs.get(job_id)
+    if job is None:
+        return
+    job["phase"] = phase
+    if current is not None and total is not None:
+        job["progress"] = {"current": current, "total": total}
+    else:
+        job["progress"] = None
 
 
 def _save_note_to_db(
@@ -82,7 +97,20 @@ async def run_upload_job(
     available_tags: list[str] | None,
 ) -> None:
     try:
-        transcription = await transcribe_audio(file_path, language=language)
+        _update_job_progress(job_id, phase="transcribing")
+
+        def on_transcribe_progress(current: int, total: int) -> None:
+            _update_job_progress(
+                job_id, phase="transcribing", current=current, total=total
+            )
+
+        transcription = await transcribe_audio_long(
+            file_path,
+            language=language,
+            on_progress=on_transcribe_progress,
+        )
+
+        _update_job_progress(job_id, phase="analyzing")
         processed = await process_transcript(
             transcription,
             model=ai_model,
@@ -110,6 +138,8 @@ async def run_upload_job(
             "result": result,
             "error": None,
             "note_id": note_id,
+            "phase": "completed",
+            "progress": None,
         }
     except Exception as exc:
         _jobs[job_id] = {
@@ -121,6 +151,8 @@ async def run_upload_job(
             "result": None,
             "error": str(exc),
             "note_id": None,
+            "phase": "failed",
+            "progress": None,
         }
 
 

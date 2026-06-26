@@ -33,6 +33,8 @@ class AudioNote {
     this.tag = 'Memo',
     this.analysisStatus = NoteAnalysisStatus.ready,
     this.structuredData = const NoteStructuredData(),
+    this.uploadSessionId,
+    this.uploadedChunks = 0,
   });
 
   final String id;
@@ -47,6 +49,8 @@ class AudioNote {
   final String tag;
   final NoteAnalysisStatus analysisStatus;
   final NoteStructuredData structuredData;
+  final String? uploadSessionId;
+  final int uploadedChunks;
 
   bool get isProcessing => analysisStatus.isProcessing;
 
@@ -94,6 +98,9 @@ class AudioNote {
     String? tag,
     NoteAnalysisStatus? analysisStatus,
     NoteStructuredData? structuredData,
+    String? uploadSessionId,
+    int? uploadedChunks,
+    bool clearUploadSession = false,
   }) {
     return AudioNote(
       id: id ?? this.id,
@@ -108,6 +115,9 @@ class AudioNote {
       tag: tag ?? this.tag,
       analysisStatus: analysisStatus ?? this.analysisStatus,
       structuredData: structuredData ?? this.structuredData,
+      uploadSessionId:
+          clearUploadSession ? null : (uploadSessionId ?? this.uploadSessionId),
+      uploadedChunks: uploadedChunks ?? this.uploadedChunks,
     );
   }
 
@@ -165,6 +175,8 @@ class AudioNote {
       structuredData: NoteStructuredData.fromJsonString(
         map['structured_json'] as String?,
       ),
+      uploadSessionId: map['upload_session_id'] as String?,
+      uploadedChunks: map['uploaded_chunks'] as int? ?? 0,
     );
   }
 
@@ -182,6 +194,8 @@ class AudioNote {
       'tag': tag,
       'analysis_status': analysisStatus.dbValue,
       'structured_json': structuredData.toJsonString(),
+      'upload_session_id': uploadSessionId,
+      'uploaded_chunks': uploadedChunks,
     };
   }
 }

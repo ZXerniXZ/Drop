@@ -9,12 +9,14 @@ import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
 import '../services/api_url_resolver.dart';
+import '../models/ai_preferences.dart';
 import '../models/audio_note.dart';
 import '../models/note_structured_data.dart';
 import '../models/note_tags_config.dart';
 import '../models/record_orb_style.dart';
 import '../services/app_preferences_service.dart';
 import '../models/note_filters.dart';
+import '../services/chunked_upload_service.dart';
 import '../services/audio_recording_config.dart';
 import '../services/cloud_sync_service.dart';
 import '../services/local_database_service.dart';
@@ -226,9 +228,16 @@ class _RecorderScreenState extends State<RecorderScreen> {
     return ApiUrlResolver.resolveEndpoint('/jobs/$jobId');
   }
 
-  Future<Map<String, dynamic>?> _pollUploadJob(String jobId) async {
-    const maxAttempts = 200;
+  Future<Map<String, dynamic>?> _pollUploadJob(
+    String jobId, {
+    required int durationSeconds,
+  }) async {
     const pollInterval = Duration(seconds: 3);
+    final minAttempts = 200;
+    final durationBasedAttempts = ((durationSeconds * 2) / pollInterval.inSeconds)
+        .ceil()
+        .clamp(minAttempts, 3600);
+    final maxAttempts = durationBasedAttempts;
 
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
       if (!mounted) return null;
@@ -270,7 +279,78 @@ class _RecorderScreenState extends State<RecorderScreen> {
       await Future<void>.delayed(pollInterval);
     }
 
-    throw Exception('Timeout elaborazione (oltre 10 minuti)');
+    throw Exception(
+      'Timeout elaborazione (oltre ${(maxAttempts * pollInterval.inSeconds) ~/ 60} minuti)',
+    );
+  }
+
+  Future<Map<String, dynamic>?> _uploadViaBackend({
+    required String filePath,
+    required AudioNote placeholder,
+    required AiPreferences prefs,
+    required List<String> tags,
+    required int durationSeconds,
+  }) async {
+    final accessToken = await _requireAccessToken();
+    final fileSize = await File(filePath).length();
+    String jobId;
+
+    if (fileSize <= legacyUploadMaxBytes) {
+      final url = await _resolveUploadUrl();
+      final request = http.MultipartRequest('POST', Uri.parse(url));
+      request.headers['Authorization'] = 'Bearer $accessToken';
+      request.files.add(await http.MultipartFile.fromPath('file', filePath));
+      request.fields['ai_model'] = prefs.model.openRouterId;
+      request.fields['language'] = prefs.transcriptionLanguage.name;
+      request.fields['available_tags'] = jsonEncode(tags);
+      if (prefs.customPrompt.trim().isNotEmpty) {
+        request.fields['custom_prompt'] = prefs.customPrompt.trim();
+      }
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final id = data['job_id'] as String?;
+        if (id == null || id.isEmpty) {
+          throw Exception('Risposta server senza job_id');
+        }
+        jobId = id;
+      } else {
+        var errorDetail = response.body;
+        try {
+          final errJson = jsonDecode(response.body) as Map<String, dynamic>;
+          errorDetail = errJson['detail']?.toString() ?? errorDetail;
+        } catch (_) {}
+        if (response.statusCode == 401 || response.statusCode == 403) {
+          errorDetail = 'Accesso richiesto. Effettua di nuovo l\'accesso.';
+        }
+        throw Exception('Upload fallito (${response.statusCode}): $errorDetail');
+      }
+    } else {
+      jobId = await ChunkedUploadService.instance.uploadFileAndStartJob(
+        filePath: filePath,
+        accessToken: accessToken,
+        prefs: prefs,
+        availableTags: tags,
+        existingUploadSessionId: placeholder.uploadSessionId,
+        lastUploadedChunkIndex: placeholder.uploadedChunks > 0
+            ? placeholder.uploadedChunks - 1
+            : null,
+        onSessionProgress: (uploadSessionId, uploadedChunkIndex) async {
+          final progressNote = placeholder.copyWith(
+            uploadSessionId: uploadSessionId,
+            uploadedChunks: uploadedChunkIndex >= 0 ? uploadedChunkIndex + 1 : 0,
+          );
+          await LocalDatabaseService.instance.saveNote(progressNote);
+          if (!mounted) return;
+          _updateNoteInList(progressNote);
+        },
+      );
+    }
+
+    return _pollUploadJob(jobId, durationSeconds: durationSeconds);
   }
 
   Future<void> _processUpload({
@@ -297,48 +377,13 @@ class _RecorderScreenState extends State<RecorderScreen> {
           availableTags: tagsConfig.tags,
         );
       } else {
-        final url = await _resolveUploadUrl();
-        final accessToken = await _requireAccessToken();
-        final request = http.MultipartRequest('POST', Uri.parse(url));
-        request.headers['Authorization'] = 'Bearer $accessToken';
-        request.files.add(await http.MultipartFile.fromPath('file', filePath));
-        request.fields['ai_model'] = prefs.model.openRouterId;
-        request.fields['language'] = prefs.transcriptionLanguage.name;
-        request.fields['available_tags'] = jsonEncode(tagsConfig.tags);
-        if (prefs.customPrompt.trim().isNotEmpty) {
-          request.fields['custom_prompt'] = prefs.customPrompt.trim();
-        }
-
-        final streamedResponse = await request.send();
-        final response = await http.Response.fromStream(streamedResponse);
-
-        if (!mounted) return;
-
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body) as Map<String, dynamic>;
-          final jobId = data['job_id'] as String?;
-          if (jobId == null || jobId.isEmpty) {
-            throw Exception('Risposta server senza job_id');
-          }
-          result = await _pollUploadJob(jobId);
-        } else {
-          var errorDetail = response.body;
-          try {
-            final errJson = jsonDecode(response.body) as Map<String, dynamic>;
-            errorDetail = errJson['detail']?.toString() ?? errorDetail;
-          } catch (_) {}
-          if (response.statusCode == 401 || response.statusCode == 403) {
-            errorDetail = 'Accesso richiesto. Effettua di nuovo l\'accesso.';
-          }
-          final failed = placeholder.copyWith(
-            analysisStatus: NoteAnalysisStatus.failed,
-            transcription: 'Upload fallito (${response.statusCode}): $errorDetail',
-          );
-          await LocalDatabaseService.instance.saveNote(failed);
-          if (!mounted) return;
-          _updateNoteInList(failed);
-          return;
-        }
+        result = await _uploadViaBackend(
+          filePath: filePath,
+          placeholder: placeholder,
+          prefs: prefs,
+          tags: tagsConfig.tags,
+          durationSeconds: durationSeconds,
+        );
       }
 
       if (!mounted) return;
@@ -351,7 +396,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
         result,
         placeholder: placeholder,
         audioPath: persistedPath,
-      );
+      ).copyWith(clearUploadSession: true, uploadedChunks: 0);
 
       await LocalDatabaseService.instance.saveNote(note);
       if (!mounted) return;

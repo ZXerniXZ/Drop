@@ -4,7 +4,12 @@ from typing import Any
 
 import httpx
 
-from config import OPENROUTER_API_KEY, OPENROUTER_LLM_MODEL, LLM_TIMEOUT_SECONDS
+from config import (
+    LLM_TIMEOUT_SECONDS,
+    MAX_TRANSCRIPT_CHARS,
+    OPENROUTER_API_KEY,
+    OPENROUTER_LLM_MODEL,
+)
 
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 APP_REFERER = "https://github.com/ZXerniXZ/Drop"
@@ -206,6 +211,12 @@ def _build_user_prompt(transcript: str, custom_prompt: str | None) -> str:
     return "".join(parts)
 
 
+def _truncate_transcript(text: str) -> str:
+    if len(text) <= MAX_TRANSCRIPT_CHARS:
+        return text
+    return text[:MAX_TRANSCRIPT_CHARS] + "\n\n[... trascrizione troncata per analisi LLM ...]"
+
+
 async def process_transcript(
     transcript: str,
     *,
@@ -218,7 +229,7 @@ async def process_transcript(
         raise ValueError("OPENROUTER_API_KEY is not configured")
 
     resolved_model = resolve_llm_model(model)
-    user_prompt = _build_user_prompt(transcript, custom_prompt)
+    user_prompt = _build_user_prompt(_truncate_transcript(transcript), custom_prompt)
     tags_pool = [t.strip() for t in (available_tags or DEFAULT_TAGS) if t.strip()]
 
     if language and language.strip().lower() not in {"automatic", "automatico", ""}:
