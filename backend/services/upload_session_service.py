@@ -27,6 +27,13 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _as_utc_aware(dt: datetime) -> datetime:
+    """SQLite may return naive datetimes even with DateTime(timezone=True)."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def _session_chunks_dir(upload_id: str) -> Path:
     return UPLOADS_DIR / upload_id
 
@@ -39,9 +46,11 @@ def cleanup_expired_sessions() -> None:
     db = SessionLocal()
     try:
         now = _utc_now()
-        expired = db.scalars(
-            select(UploadSessionDB).where(UploadSessionDB.expires_at < now)
-        ).all()
+        expired = [
+            s
+            for s in db.scalars(select(UploadSessionDB)).all()
+            if _as_utc_aware(s.expires_at) < now
+        ]
         for session in expired:
             _delete_session_files(session.id)
             db.delete(session)
@@ -61,7 +70,7 @@ def _get_owned_session(
         raise HTTPException(status_code=404, detail="Upload session not found")
     if session.user_id != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
-    if session.expires_at < _utc_now():
+    if session.expires_at is not None and _as_utc_aware(session.expires_at) < _utc_now():
         raise HTTPException(status_code=410, detail="Upload session expired")
     return session
 
