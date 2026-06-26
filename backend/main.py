@@ -3,6 +3,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import asyncio
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -14,6 +15,7 @@ import config  # noqa: F401
 from auth import get_current_user
 from database import Base, engine, get_db
 from models.note import NoteDB  # noqa: F401
+from models.job import JobDB  # noqa: F401
 from models.upload_session import (  # noqa: F401
     CHUNK_SIZE,
     LEGACY_UPLOAD_MAX_BYTES,
@@ -89,6 +91,11 @@ def _get_owned_note(db: Session, note_id: str, user_id: str) -> NoteDB:
     return note
 
 
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
 @app.post("/upload-audio/sessions")
 async def create_upload_session(
     body: UploadSessionCreate,
@@ -139,8 +146,10 @@ async def complete_upload_session(
     upload_id: str,
     current_user_id: str = Depends(get_current_user),
 ):
-    saved_name, file_path, metadata = complete_session(
-        upload_id, user_id=current_user_id
+    saved_name, file_path, metadata = await asyncio.to_thread(
+        complete_session,
+        upload_id,
+        user_id=current_user_id,
     )
     job_id = str(uuid.uuid4())
     start_upload_job(
@@ -195,7 +204,7 @@ async def upload_audio(
                 "Use chunked upload sessions."
             ),
         )
-    destination.write_bytes(content)
+    await asyncio.to_thread(destination.write_bytes, content)
 
     job_id = str(uuid.uuid4())
     start_upload_job(
@@ -227,20 +236,8 @@ async def get_upload_job(
     if job.get("user_id") != current_user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    response: dict[str, Any] = {
-        "job_id": job_id,
-        "status": job["status"],
-    }
-    if job.get("note_id"):
-        response["note_id"] = job["note_id"]
-    if job.get("error"):
-        response["error"] = job["error"]
-    if job.get("result"):
-        response["result"] = job["result"]
-    if job.get("phase"):
-        response["phase"] = job["phase"]
-    if job.get("progress"):
-        response["progress"] = job["progress"]
+    response = dict(job)
+    response.pop("user_id", None)
     return response
 
 

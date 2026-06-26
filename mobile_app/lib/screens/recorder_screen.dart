@@ -263,12 +263,13 @@ class _RecorderScreenState extends State<RecorderScreen> {
 
       if (response.statusCode == 502 ||
           response.statusCode == 503 ||
-          response.statusCode == 504) {
+          response.statusCode == 504 ||
+          response.statusCode == 500) {
         gatewayFailures++;
         if (gatewayFailures >= maxGatewayFailures) {
           throw Exception(
             'Server temporaneamente non disponibile (${response.statusCode}). '
-            'Il backend potrebbe essere sovraccarico: riprova tra qualche minuto.',
+            'Riprova tra qualche minuto.',
           );
         }
         await Future<void>.delayed(pollInterval);
@@ -276,7 +277,12 @@ class _RecorderScreenState extends State<RecorderScreen> {
       }
 
       if (response.statusCode != 200) {
-        throw Exception('Polling fallito (${response.statusCode})');
+        final detail = response.body.length > 120
+            ? '${response.body.substring(0, 120)}...'
+            : response.body;
+        throw Exception(
+          'Polling fallito (${response.statusCode})${detail.isEmpty ? '' : ': $detail'}',
+        );
       }
 
       gatewayFailures = 0;

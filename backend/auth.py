@@ -1,3 +1,5 @@
+import asyncio
+
 import jwt
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -44,7 +46,7 @@ def _decode_token(token: str) -> dict:
     )
 
 
-def get_current_user(
+async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> str:
     if credentials is None or credentials.scheme.lower() != "bearer":
@@ -60,7 +62,7 @@ def get_current_user(
 
     token = credentials.credentials
     try:
-        payload = _decode_token(token)
+        payload = await asyncio.to_thread(_decode_token, token)
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired") from None
     except jwt.InvalidTokenError:

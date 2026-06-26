@@ -4,54 +4,98 @@ from datetime import datetime, timezone
 from typing import Any
 
 from database import SessionLocal
+from models.job import JobDB
 from models.note import NoteDB
 from services.audio_segmentation_service import transcribe_audio_long
 from services.llm_service import process_transcript
 
-_jobs: dict[str, dict[str, Any]] = {}
-_MAX_JOBS = 200
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
-def _prune_jobs() -> None:
-    if len(_jobs) <= _MAX_JOBS:
-        return
-    oldest = sorted(
-        _jobs.items(),
-        key=lambda item: item[1].get("created_at", ""),
-    )
-    for job_id, _ in oldest[: len(_jobs) - _MAX_JOBS]:
-        _jobs.pop(job_id, None)
+def _with_db():
+    return SessionLocal()
 
 
 def create_job(job_id: str, *, user_id: str) -> None:
-    _prune_jobs()
-    _jobs[job_id] = {
-        "status": "processing",
-        "user_id": user_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "result": None,
-        "error": None,
-        "note_id": None,
-        "phase": "transcribing",
-        "progress": None,
-    }
+    db = _with_db()
+    try:
+        db.add(
+            JobDB(
+                id=job_id,
+                user_id=user_id,
+                status="processing",
+                phase="transcribing",
+            )
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def get_job(job_id: str) -> dict[str, Any] | None:
-    return _jobs.get(job_id)
+    db = _with_db()
+    try:
+        job = db.get(JobDB, job_id)
+        if job is None:
+            return None
+        return job.to_status_dict() | {"user_id": job.user_id}
+    finally:
+        db.close()
+
+
+def _update_job(
+    job_id: str,
+    *,
+    status: str | None = None,
+    phase: str | None = None,
+    progress: dict[str, Any] | None = None,
+    clear_progress: bool = False,
+    result: dict[str, Any] | None = None,
+    error: str | None = None,
+    note_id: str | None = None,
+) -> None:
+    db = _with_db()
+    try:
+        job = db.get(JobDB, job_id)
+        if job is None:
+            return
+        if status is not None:
+            job.status = status
+        if phase is not None:
+            job.phase = phase
+        if clear_progress:
+            job.progress = None
+        elif progress is not None:
+            job.progress = progress
+        if result is not None:
+            job.result = result
+        if error is not None:
+            job.error = error
+        if note_id is not None:
+            job.note_id = note_id
+        db.add(job)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def _update_job_progress(
     job_id: str, *, phase: str, current: int | None = None, total: int | None = None
 ) -> None:
-    job = _jobs.get(job_id)
-    if job is None:
-        return
-    job["phase"] = phase
-    if current is not None and total is not None:
-        job["progress"] = {"current": current, "total": total}
-    else:
-        job["progress"] = None
+    progress = (
+        {"current": current, "total": total}
+        if current is not None and total is not None
+        else None
+    )
+    _update_job(job_id, phase=phase, progress=progress, clear_progress=progress is None)
 
 
 def _save_note_to_db(
@@ -61,7 +105,7 @@ def _save_note_to_db(
     processed: dict[str, Any],
 ) -> str:
     note_id = str(uuid.uuid4())
-    db = SessionLocal()
+    db = _with_db()
     try:
         note = NoteDB(
             id=note_id,
@@ -131,29 +175,23 @@ async def run_upload_job(
             "key_data": processed["key_data"],
             "speaker_view": processed["speaker_view"],
         }
-        _jobs[job_id] = {
-            "status": "completed",
-            "user_id": user_id,
-            "created_at": _jobs[job_id]["created_at"],
-            "result": result,
-            "error": None,
-            "note_id": note_id,
-            "phase": "completed",
-            "progress": None,
-        }
+        _update_job(
+            job_id,
+            status="completed",
+            phase="completed",
+            clear_progress=True,
+            result=result,
+            error=None,
+            note_id=note_id,
+        )
     except Exception as exc:
-        _jobs[job_id] = {
-            "status": "failed",
-            "user_id": user_id,
-            "created_at": _jobs.get(job_id, {}).get(
-                "created_at", datetime.now(timezone.utc).isoformat()
-            ),
-            "result": None,
-            "error": str(exc),
-            "note_id": None,
-            "phase": "failed",
-            "progress": None,
-        }
+        _update_job(
+            job_id,
+            status="failed",
+            phase="failed",
+            clear_progress=True,
+            error=str(exc),
+        )
 
 
 def start_upload_job(
