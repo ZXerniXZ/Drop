@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import DateTime, JSON, String, Text
+from sqlalchemy import DateTime, Float, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -29,6 +29,11 @@ class NoteDB(Base):
     speaker_view: Mapped[list[dict[str, Any]]] = mapped_column(
         JSON, nullable=False, default=list
     )
+    # Timestamp reali di Whisper: [{start, end, text, words: [{w, start, end}]}]
+    transcript_segments: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    audio_duration: Mapped[float | None] = mapped_column(Float, nullable=True)
     audio_filename: Mapped[str] = mapped_column(String, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utc_now
@@ -46,5 +51,7 @@ class NoteDB(Base):
             "highlights": self.highlights,
             "key_data": self.key_data,
             "speaker_view": self.speaker_view,
+            "transcript_segments": self.transcript_segments or [],
+            "audio_duration": self.audio_duration,
             "created_at": self.created_at.isoformat(),
         }

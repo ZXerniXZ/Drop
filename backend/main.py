@@ -6,14 +6,14 @@ from typing import Any
 import asyncio
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 import config  # noqa: F401
 from auth import get_current_user
-from database import Base, engine, get_db
+from database import Base, engine, ensure_schema, get_db
 from models.note import NoteDB  # noqa: F401
 from models.job import JobDB  # noqa: F401
 from models.upload_session import (  # noqa: F401
@@ -34,6 +34,16 @@ from services.upload_session_service import (
 
 STORAGE_DIR = Path(__file__).parent / "storage"
 
+AUDIO_MEDIA_TYPES = {
+    ".m4a": "audio/mp4",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".aac": "audio/aac",
+    ".ogg": "audio/ogg",
+    ".webm": "audio/webm",
+    ".flac": "audio/flac",
+}
+
 app = FastAPI(title="Drop Backend")
 
 app.add_middleware(
@@ -43,6 +53,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class NoteReanalyzeRequest(BaseModel):
+    ai_model: str | None = None
+    language: str | None = None
+    custom_prompt: str | None = None
+    available_tags: list[str] | None = None
 
 
 class UploadSessionCreate(BaseModel):
@@ -59,6 +76,7 @@ class UploadSessionCreate(BaseModel):
 @app.on_event("startup")
 def init_db():
     Base.metadata.create_all(bind=engine)
+    ensure_schema()
     cleanup_expired_sessions()
 
 
@@ -91,6 +109,14 @@ def _get_owned_note(db: Session, note_id: str, user_id: str) -> NoteDB:
     if note.user_id != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
     return note
+
+
+def _note_audio_path(note: NoteDB) -> Path | None:
+    if not note.audio_filename:
+        return None
+    # Il nome arriva dal database, ma resta confinato a STORAGE_DIR per sicurezza.
+    path = STORAGE_DIR / Path(note.audio_filename).name
+    return path if path.is_file() else None
 
 
 @app.get("/health")
@@ -268,6 +294,58 @@ async def get_note(
 ):
     note = _get_owned_note(db, note_id, current_user_id)
     return note.to_result_dict()
+
+
+@app.get("/notes/{note_id}/audio")
+async def get_note_audio(
+    note_id: str,
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    note = _get_owned_note(db, note_id, current_user_id)
+    path = _note_audio_path(note)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Audio file not available")
+    return FileResponse(
+        path,
+        media_type=AUDIO_MEDIA_TYPES.get(path.suffix.lower(), "application/octet-stream"),
+        filename=path.name,
+    )
+
+
+@app.post("/notes/{note_id}/reanalyze")
+async def reanalyze_note(
+    note_id: str,
+    body: NoteReanalyzeRequest,
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    note = _get_owned_note(db, note_id, current_user_id)
+    path = _note_audio_path(note)
+    if path is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Audio file no longer on the server: cannot re-transcribe",
+        )
+
+    job_id = str(uuid.uuid4())
+    start_upload_job(
+        job_id,
+        user_id=current_user_id,
+        note_id=note.id,
+        file_path=str(path),
+        saved_name=note.audio_filename,
+        ai_model=body.ai_model,
+        language=body.language,
+        custom_prompt=body.custom_prompt,
+        available_tags=body.available_tags,
+    )
+    return {
+        "success": True,
+        "job_id": job_id,
+        "status": "processing",
+        "note_id": note.id,
+    }
 
 
 @app.post("/chat-note/stream")

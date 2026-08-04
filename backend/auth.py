@@ -4,6 +4,7 @@ import jwt
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
+from jwt.exceptions import PyJWKClientError
 
 from config import SUPABASE_JWT_SECRET, SUPABASE_URL
 
@@ -21,8 +22,13 @@ def _get_jwks_client() -> PyJWKClient | None:
     return _jwks_client
 
 
+class JwksUnavailableError(Exception):
+    """Le chiavi pubbliche Supabase non sono raggiungibili."""
+
+
 def _decode_token(token: str) -> dict:
     jwks = _get_jwks_client()
+    jwks_unavailable = False
     if jwks is not None:
         try:
             signing_key = jwks.get_signing_key_from_jwt(token)
@@ -34,8 +40,16 @@ def _decode_token(token: str) -> dict:
             )
         except jwt.InvalidTokenError:
             pass
+        except PyJWKClientError:
+            # Rete o DNS non disponibili: non e' un token invalido, quindi
+            # senza fallback va segnalato come indisponibilita' temporanea.
+            jwks_unavailable = True
 
     if not SUPABASE_JWT_SECRET:
+        if jwks_unavailable:
+            raise JwksUnavailableError(
+                "Cannot reach Supabase public keys and no JWT secret is configured"
+            )
         raise jwt.InvalidTokenError("JWT verification not configured")
 
     return jwt.decode(
@@ -67,6 +81,11 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Token expired") from None
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token") from None
+    except JwksUnavailableError:
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication temporarily unavailable, retry shortly",
+        ) from None
 
     user_id = payload.get("sub")
     if not user_id:

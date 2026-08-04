@@ -13,6 +13,9 @@ TRANSCRIPTION_TIMEOUT_SECONDS = float(
 )
 LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "300"))
 MAX_TRANSCRIPT_CHARS = int(os.getenv("MAX_TRANSCRIPT_CHARS", "100000"))
+# Durata degli spezzoni inviati a Whisper: piu' corti danno un avanzamento
+# misurabile all'app, piu' lunghi riducono il numero di richieste.
+SEGMENT_TARGET_SECONDS = float(os.getenv("SEGMENT_TARGET_SECONDS", "300"))
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./drop_backend.db")
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
