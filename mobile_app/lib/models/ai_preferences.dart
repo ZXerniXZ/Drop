@@ -24,6 +24,7 @@ class AiPreferences {
 }
 
 enum AiModel {
+  gemini36Flash('Gemini 3.6 Flash', 'google/gemini-3.6-flash'),
   gemini35Flash('Gemini 3.5 Flash', 'google/gemini-3.5-flash'),
   geminiFlash('Gemini 2.5 Flash', 'google/gemini-2.5-flash'),
   geminiPro('Gemini 2.5 Pro', 'google/gemini-2.5-pro');

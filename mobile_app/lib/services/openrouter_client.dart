@@ -28,6 +28,10 @@ const maxTranscriptChars = 12000;
 const headTailChars = 4000;
 
 const _modelAliases = <String, String>{
+  'gemini_36_flash': 'google/gemini-3.6-flash',
+  'gemini36flash': 'google/gemini-3.6-flash',
+  'gemini 3.6 flash': 'google/gemini-3.6-flash',
+  'google/gemini-3.6-flash': 'google/gemini-3.6-flash',
   'gemini_35_flash': 'google/gemini-3.5-flash',
   'gemini35flash': 'google/gemini-3.5-flash',
   'gemini 3.5 flash': 'google/gemini-3.5-flash',

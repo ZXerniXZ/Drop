@@ -16,6 +16,10 @@ APP_REFERER = "https://github.com/ZXerniXZ/Drop"
 APP_TITLE = "Drop"
 
 MODEL_ALIASES: dict[str, str] = {
+    "gemini_36_flash": "google/gemini-3.6-flash",
+    "gemini36flash": "google/gemini-3.6-flash",
+    "gemini 3.6 flash": "google/gemini-3.6-flash",
+    "google/gemini-3.6-flash": "google/gemini-3.6-flash",
     "gemini_35_flash": "google/gemini-3.5-flash",
     "gemini35flash": "google/gemini-3.5-flash",
     "gemini 3.5 flash": "google/gemini-3.5-flash",
