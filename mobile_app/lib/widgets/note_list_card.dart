@@ -25,8 +25,9 @@ class NoteListCard extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isProcessing = note.isProcessing;
     final isFailed = note.isFailed;
+    final phase = note.analysisPhase;
     final preview = isProcessing
-        ? 'Analisi in corso...'
+        ? (phase?.label ?? 'Analisi in corso...')
         : isFailed
             ? (note.transcription.isNotEmpty
                 ? note.transcription
@@ -137,6 +138,14 @@ class NoteListCard extends StatelessWidget {
                         ),
                   ),
                 ],
+                if (isProcessing) ...[
+                  const SizedBox(height: 12),
+                  _AnalysisProgressBar(
+                    fraction: note.analysisFraction,
+                    current: note.analysisCurrent,
+                    total: note.analysisTotal,
+                  ),
+                ],
                 if (isFailed && onRetry != null) ...[
                   const SizedBox(height: 12),
                   Align(
@@ -199,6 +208,52 @@ class NoteListCard extends StatelessWidget {
     );
 
     if (confirmed == true) onDelete();
+  }
+}
+
+/// Barra di avanzamento dell'elaborazione: determinata quando il backend sa
+/// quanti spezzoni restano, indeterminata quando la fase non e' misurabile.
+class _AnalysisProgressBar extends StatelessWidget {
+  const _AnalysisProgressBar({
+    required this.fraction,
+    required this.current,
+    required this.total,
+  });
+
+  final double? fraction;
+  final int current;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = fraction;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          // value nullo significa barra indeterminata: e' il caso delle fasi
+          // di cui il backend non conosce l'avanzamento.
+          child: LinearProgressIndicator(
+            value: progress,
+            minHeight: 4,
+            backgroundColor: DropColors.muted(context).withValues(alpha: 0.15),
+            valueColor: const AlwaysStoppedAnimation(DropColors.recordRed),
+          ),
+        ),
+        if (progress != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            '$current di $total · ${(progress * 100).round()}%',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  fontSize: 10,
+                  color: DropColors.muted(context),
+                ),
+          ),
+        ],
+      ],
+    );
   }
 }
 

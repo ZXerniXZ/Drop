@@ -6,7 +6,7 @@ from typing import Any
 from database import SessionLocal
 from models.job import JobDB
 from models.note import NoteDB
-from services.audio_segmentation_service import transcribe_audio_long
+from services.audio_segmentation_service import transcribe_audio_long_verbose
 from services.llm_service import process_transcript
 
 
@@ -90,11 +90,13 @@ def _update_job(
 def _update_job_progress(
     job_id: str, *, phase: str, current: int | None = None, total: int | None = None
 ) -> None:
-    progress = (
-        {"current": current, "total": total}
-        if current is not None and total is not None
-        else None
-    )
+    progress = None
+    if current is not None and total is not None and total > 0:
+        progress = {
+            "current": current,
+            "total": total,
+            "percent": round(current * 100 / total),
+        }
     _update_job(job_id, phase=phase, progress=progress, clear_progress=progress is None)
 
 
@@ -105,8 +107,11 @@ def _save_note_to_db(
     processed: dict[str, Any],
     *,
     note_id: str | None = None,
+    transcript_segments: list[dict[str, Any]] | None = None,
+    audio_duration: float | None = None,
 ) -> str:
     resolved_id = (note_id or "").strip() or str(uuid.uuid4())
+    segments = transcript_segments or []
     db = _with_db()
     try:
         existing = db.get(NoteDB, resolved_id)
@@ -120,6 +125,8 @@ def _save_note_to_db(
             existing.highlights = processed["highlights"]
             existing.key_data = processed["key_data"]
             existing.speaker_view = processed["speaker_view"]
+            existing.transcript_segments = segments
+            existing.audio_duration = audio_duration
             existing.audio_filename = saved_name
             db.add(existing)
             db.commit()
@@ -135,6 +142,8 @@ def _save_note_to_db(
             highlights=processed["highlights"],
             key_data=processed["key_data"],
             speaker_view=processed["speaker_view"],
+            transcript_segments=segments,
+            audio_duration=audio_duration,
             audio_filename=saved_name,
         )
         db.add(note)
@@ -167,11 +176,14 @@ async def run_upload_job(
                 job_id, phase="transcribing", current=current, total=total
             )
 
-        transcription = await transcribe_audio_long(
+        verbose = await transcribe_audio_long_verbose(
             file_path,
             language=language,
             on_progress=on_transcribe_progress,
         )
+        transcription = verbose["text"]
+        transcript_segments = verbose["segments"]
+        audio_duration = verbose.get("duration")
 
         _update_job_progress(job_id, phase="analyzing")
         processed = await process_transcript(
@@ -187,6 +199,8 @@ async def run_upload_job(
             transcription,
             processed,
             note_id=note_id,
+            transcript_segments=transcript_segments,
+            audio_duration=audio_duration,
         )
         result = {
             "success": True,
@@ -199,6 +213,8 @@ async def run_upload_job(
             "highlights": processed["highlights"],
             "key_data": processed["key_data"],
             "speaker_view": processed["speaker_view"],
+            "transcript_segments": transcript_segments,
+            "audio_duration": audio_duration,
         }
         _update_job(
             job_id,
