@@ -20,11 +20,13 @@ class NoteDetailScreen extends StatefulWidget {
     required this.note,
     required this.onDelete,
     this.onRetry,
+    this.onReanalyze,
   });
 
   final AudioNote note;
   final VoidCallback onDelete;
   final VoidCallback? onRetry;
+  final VoidCallback? onReanalyze;
 
   @override
   State<NoteDetailScreen> createState() => _NoteDetailScreenState();
@@ -79,6 +81,34 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
     Navigator.of(context).pop();
   }
 
+  Future<void> _confirmReanalyze() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Rifai analisi'),
+        content: const Text(
+          'L\'audio verra\' trascritto e analizzato di nuovo da zero. '
+          'Titolo, riassunto e highlights attuali saranno sostituiti.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Annulla'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Rifai'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+    widget.onReanalyze!();
+    // L'avanzamento si segue dalla lista: qui i dati sarebbero ormai vecchi.
+    Navigator.of(context).pop();
+  }
+
   void _onAskAiSend() {
     final text = _askAiController.text.trim();
     if (text.isEmpty) {
@@ -109,8 +139,10 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
             Expanded(
               child: _mode == _DetailMode.sources
                   ? NoteAudioPlayer(
+                      noteId: widget.note.id,
                       audioPath: widget.note.audioPath,
                       fallbackDurationSeconds: widget.note.durationSeconds,
+                      segments: widget.note.transcriptSegments,
                     )
                   : _buildNotesContent(context),
             ),
@@ -199,6 +231,13 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
             mode: _mode,
             onChanged: (m) => setState(() => _mode = m),
           ))),
+          if (widget.onReanalyze != null)
+            IconButton(
+              onPressed: _confirmReanalyze,
+              icon: const Icon(Icons.autorenew, size: 22),
+              color: DropColors.muted(context),
+              tooltip: 'Rifai analisi',
+            ),
           IconButton(
             onPressed: _confirmDelete,
             icon: const Icon(Icons.delete_outline, size: 22),

@@ -1,20 +1,26 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 
+import '../../models/transcript_segment.dart';
+import '../../services/note_audio_service.dart';
 import '../../theme/drop_theme.dart';
+import 'karaoke_transcript.dart';
 
 class NoteAudioPlayer extends StatefulWidget {
   const NoteAudioPlayer({
     super.key,
+    required this.noteId,
     required this.audioPath,
     required this.fallbackDurationSeconds,
+    this.segments = const [],
   });
 
+  final String noteId;
   final String audioPath;
   final int fallbackDurationSeconds;
+  final List<TranscriptSegment> segments;
 
   @override
   State<NoteAudioPlayer> createState() => _NoteAudioPlayerState();
@@ -27,6 +33,9 @@ class _NoteAudioPlayerState extends State<NoteAudioPlayer> {
 
   bool _isReady = false;
   bool _fileMissing = false;
+  bool _isDownloading = false;
+  String? _downloadError;
+  late String _audioPath;
   Duration _duration = Duration.zero;
   Duration _position = Duration.zero;
   bool _isPlaying = false;
@@ -34,21 +43,33 @@ class _NoteAudioPlayerState extends State<NoteAudioPlayer> {
   @override
   void initState() {
     super.initState();
+    _audioPath = widget.audioPath;
     _initPlayer();
   }
 
   Future<void> _initPlayer() async {
-    if (widget.audioPath.isEmpty || !await File(widget.audioPath).exists()) {
+    final resolved = await NoteAudioService.instance.localPathIfExists(
+      widget.noteId,
+      currentPath: _audioPath,
+    );
+
+    if (resolved == null) {
       if (!mounted) return;
       setState(() {
         _fileMissing = true;
+        _isReady = false;
         _duration = Duration(seconds: widget.fallbackDurationSeconds);
       });
       return;
     }
+    _audioPath = resolved;
 
     try {
-      await _player.setFilePath(widget.audioPath);
+      // Init puo' ripetersi dopo un download: evita doppie sottoscrizioni.
+      await _positionSub?.cancel();
+      await _stateSub?.cancel();
+
+      await _player.setFilePath(_audioPath);
       final duration = _player.duration;
       _positionSub = _player.positionStream.listen((position) {
         if (!mounted) return;
@@ -67,6 +88,7 @@ class _NoteAudioPlayerState extends State<NoteAudioPlayer> {
       if (!mounted) return;
       setState(() {
         _isReady = true;
+        _fileMissing = false;
         _duration = duration ??
             Duration(seconds: widget.fallbackDurationSeconds);
       });
@@ -75,6 +97,36 @@ class _NoteAudioPlayerState extends State<NoteAudioPlayer> {
       setState(() {
         _fileMissing = true;
         _duration = Duration(seconds: widget.fallbackDurationSeconds);
+      });
+    }
+  }
+
+  /// L'audio non viene scaricato da solo: un file da decine di MB su rete
+  /// mobile deve restare una scelta dell'utente.
+  Future<void> _downloadAudio() async {
+    setState(() {
+      _isDownloading = true;
+      _downloadError = null;
+    });
+
+    try {
+      final path = await NoteAudioService.instance.downloadAudio(widget.noteId);
+      if (!mounted) return;
+      if (path == null) {
+        setState(() {
+          _isDownloading = false;
+          _downloadError = 'Il server non ha piu\' questo audio';
+        });
+        return;
+      }
+      _audioPath = path;
+      setState(() => _isDownloading = false);
+      await _initPlayer();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isDownloading = false;
+        _downloadError = '$e';
       });
     }
   }
@@ -112,6 +164,11 @@ class _NoteAudioPlayerState extends State<NoteAudioPlayer> {
     await _player.seek(Duration(milliseconds: (value * maxMs).round()));
   }
 
+  Future<void> _seekTo(Duration position) async {
+    if (!_isReady || _fileMissing) return;
+    await _player.seek(position);
+  }
+
   Future<void> _skip(int seconds) async {
     if (!_isReady || _fileMissing) return;
     final target = _position + Duration(seconds: seconds);
@@ -123,29 +180,80 @@ class _NoteAudioPlayerState extends State<NoteAudioPlayer> {
     await _player.seek(clamped);
   }
 
+  Widget _buildMissingAudio(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        children: [
+          Text(
+            'FILE AUDIO NON DISPONIBILE',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: DropColors.recordRed,
+            ),
+          ),
+          if (_downloadError != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              _downloadError!,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontSize: 11,
+                color: DropColors.recordRed.withValues(alpha: 0.85),
+              ),
+            ),
+          ],
+          const SizedBox(height: 4),
+          if (_isDownloading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          else
+            TextButton.icon(
+              onPressed: _downloadAudio,
+              icon: const Icon(Icons.download_outlined, size: 18),
+              label: const Text('Scarica dal server'),
+              style: TextButton.styleFrom(
+                foregroundColor: DropColors.recordRed,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final maxMs = _duration.inMilliseconds;
     final sliderValue =
         maxMs > 0 ? (_position.inMilliseconds / maxMs).clamp(0.0, 1.0) : 0.0;
 
+    final hasKaraoke = widget.segments.isNotEmpty;
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 120),
       child: Column(
         children: [
-          const Spacer(),
-          _WaveformPlaceholder(progress: sliderValue),
-          const SizedBox(height: 32),
-          if (_fileMissing)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Text(
-                'FILE AUDIO NON DISPONIBILE',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: DropColors.recordRed,
-                    ),
+          if (hasKaraoke)
+            Expanded(
+              child: KaraokeTranscript(
+                segments: widget.segments,
+                position: _position,
+                onSeek: _seekTo,
               ),
-            ),
+            )
+          else ...[
+            const Spacer(),
+            _WaveformPlaceholder(progress: sliderValue),
+          ],
+          const SizedBox(height: 24),
+          if (_fileMissing) _buildMissingAudio(context),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -214,7 +322,9 @@ class _NoteAudioPlayerState extends State<NoteAudioPlayer> {
               ),
             ],
           ),
-          const Spacer(),
+          // Con il karaoke lo spazio verticale va alla trascrizione, non a un
+          // vuoto sotto i comandi.
+          if (!hasKaraoke) const Spacer(),
         ],
       ),
     );

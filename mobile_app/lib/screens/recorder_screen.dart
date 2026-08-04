@@ -14,12 +14,15 @@ import '../models/audio_note.dart';
 import '../models/note_structured_data.dart';
 import '../models/note_tags_config.dart';
 import '../models/record_orb_style.dart';
+import '../models/transcript_segment.dart';
 import '../services/app_preferences_service.dart';
 import '../models/note_filters.dart';
 import '../services/chunked_upload_service.dart';
 import '../services/audio_recording_config.dart';
 import '../services/cloud_sync_service.dart';
 import '../services/local_database_service.dart';
+import '../services/note_audio_service.dart';
+import '../services/note_reanalysis_service.dart';
 import '../services/openrouter_client.dart';
 import '../services/recording_foreground_service.dart';
 import '../services/supabase_auth_service.dart';
@@ -145,6 +148,35 @@ class _RecorderScreenState extends State<RecorderScreen> {
     setState(() => _notes[index] = note);
   }
 
+  /// Aggiorna la fase mostrata dalla barra di avanzamento della nota.
+  /// Parte dalla nota in elenco, non dal placeholder, per non perdere i dati
+  /// scritti nel frattempo dalla ripresa dell'upload.
+  Future<void> _reportAnalysisProgress(
+    String noteId, {
+    required NoteAnalysisPhase phase,
+    int current = 0,
+    int total = 0,
+  }) async {
+    final index = _notes.indexWhere((n) => n.id == noteId);
+    if (index == -1) return;
+
+    final note = _notes[index];
+    if (note.analysisPhase == phase &&
+        note.analysisCurrent == current &&
+        note.analysisTotal == total) {
+      return;
+    }
+
+    final updated = note.copyWith(
+      analysisPhase: phase,
+      analysisCurrent: current,
+      analysisTotal: total,
+    );
+    await LocalDatabaseService.instance.saveNote(updated);
+    if (!mounted) return;
+    _updateNoteInList(updated);
+  }
+
   String _formatDuration(Duration duration) {
     final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
@@ -182,6 +214,10 @@ class _RecorderScreenState extends State<RecorderScreen> {
       }
     }
 
+    final segments =
+        TranscriptSegment.listFromResponse(data['transcript_segments']);
+    final serverDuration = (data['audio_duration'] as num?)?.round();
+
     return placeholder.copyWith(
       title: (title != null && title.isNotEmpty) ? title : placeholder.title,
       audioPath: audioPath,
@@ -191,6 +227,11 @@ class _RecorderScreenState extends State<RecorderScreen> {
       analysisStatus: NoteAnalysisStatus.ready,
       structuredData: structured,
       tag: tag,
+      transcriptSegments: segments,
+      durationSeconds: placeholder.durationSeconds > 0
+          ? placeholder.durationSeconds
+          : serverDuration,
+      clearAnalysisProgress: true,
     );
   }
 
@@ -231,6 +272,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
   Future<Map<String, dynamic>?> _pollUploadJob(
     String jobId, {
     required int durationSeconds,
+    void Function(NoteAnalysisPhase phase, int current, int total)? onProgress,
   }) async {
     const pollInterval = Duration(seconds: 3);
     const maxGatewayFailures = 20;
@@ -290,6 +332,18 @@ class _RecorderScreenState extends State<RecorderScreen> {
       final job = jsonDecode(response.body) as Map<String, dynamic>;
       final status = job['status'] as String?;
 
+      if (onProgress != null) {
+        final phase = NoteAnalysisPhase.fromString(job['phase'] as String?);
+        if (phase != null) {
+          final progress = job['progress'];
+          final current =
+              progress is Map ? (progress['current'] as num?)?.toInt() ?? 0 : 0;
+          final total =
+              progress is Map ? (progress['total'] as num?)?.toInt() ?? 0 : 0;
+          onProgress(phase, current, total);
+        }
+      }
+
       if (status == 'completed') {
         final result = job['result'];
         if (result is Map<String, dynamic>) return result;
@@ -319,6 +373,11 @@ class _RecorderScreenState extends State<RecorderScreen> {
     final accessToken = await _requireAccessToken();
     final fileSize = await File(filePath).length();
     String jobId;
+
+    await _reportAnalysisProgress(
+      placeholder.id,
+      phase: NoteAnalysisPhase.uploading,
+    );
 
     if (fileSize <= legacyUploadMaxBytes) {
       final url = await _resolveUploadUrl();
@@ -365,6 +424,14 @@ class _RecorderScreenState extends State<RecorderScreen> {
         lastUploadedChunkIndex: placeholder.uploadedChunks > 0
             ? placeholder.uploadedChunks - 1
             : null,
+        onProgress: (uploadedChunks, totalChunks) {
+          unawaited(_reportAnalysisProgress(
+            placeholder.id,
+            phase: NoteAnalysisPhase.uploading,
+            current: uploadedChunks,
+            total: totalChunks,
+          ));
+        },
         onSessionProgress: (uploadSessionId, uploadedChunkIndex) async {
           final progressNote = placeholder.copyWith(
             uploadSessionId: uploadSessionId,
@@ -377,7 +444,18 @@ class _RecorderScreenState extends State<RecorderScreen> {
       );
     }
 
-    return _pollUploadJob(jobId, durationSeconds: durationSeconds);
+    return _pollUploadJob(
+      jobId,
+      durationSeconds: durationSeconds,
+      onProgress: (phase, current, total) {
+        unawaited(_reportAnalysisProgress(
+          placeholder.id,
+          phase: phase,
+          current: current,
+          total: total,
+        ));
+      },
+    );
   }
 
   Future<void> _processUpload({
@@ -451,12 +529,14 @@ class _RecorderScreenState extends State<RecorderScreen> {
 
   Future<void> _deleteNote(AudioNote note) async {
     await LocalDatabaseService.instance.deleteNote(note.id);
-    if (note.audioPath.isNotEmpty) {
-      try {
-        final file = File(note.audioPath);
-        if (await file.exists()) await file.delete();
-      } catch (_) {}
-    }
+    try {
+      // Anche l'audio riscaricato dal server, che non passa per audio_path.
+      final path = await NoteAudioService.instance.localPathIfExists(
+        note.id,
+        currentPath: note.audioPath,
+      );
+      if (path != null) await File(path).delete();
+    } catch (_) {}
     if (!mounted) return;
     setState(() => _notes.removeWhere((n) => n.id == note.id));
   }
@@ -681,6 +761,76 @@ class _RecorderScreenState extends State<RecorderScreen> {
     ));
   }
 
+  /// Ri-trascrive e rianalizza una nota gia' completata usando l'audio che il
+  /// backend conserva. In caso di errore la nota precedente viene ripristinata:
+  /// il contenuto vecchio resta valido finche' il nuovo non arriva.
+  Future<void> _reanalyzeNote(AudioNote note) async {
+    if (note.isProcessing) return;
+
+    final prefs = await AppPreferencesService.instance.loadAiPreferences();
+    final tagsConfig = await AppPreferencesService.instance.loadNoteTags();
+
+    final processing = note.copyWith(
+      analysisStatus: NoteAnalysisStatus.processing,
+      analysisPhase: NoteAnalysisPhase.transcribing,
+      analysisCurrent: 0,
+      analysisTotal: 0,
+    );
+    await LocalDatabaseService.instance.saveNote(processing);
+    if (!mounted) return;
+    _updateNoteInList(processing);
+
+    try {
+      final jobId = await NoteReanalysisService.instance.requestReanalysis(
+        noteId: note.id,
+        prefs: prefs,
+        availableTags: tagsConfig.tags,
+      );
+
+      final result = await _pollUploadJob(
+        jobId,
+        durationSeconds: note.durationSeconds,
+        onProgress: (phase, current, total) {
+          unawaited(_reportAnalysisProgress(
+            note.id,
+            phase: phase,
+            current: current,
+            total: total,
+          ));
+        },
+      );
+      if (result == null || !mounted) return;
+
+      final updated = _noteFromResponse(
+        result,
+        placeholder: processing,
+        audioPath: note.audioPath,
+      );
+      await LocalDatabaseService.instance.saveNote(updated);
+      if (!mounted) return;
+      _updateNoteInList(updated);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Analisi rifatta'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      final restored = note.copyWith(
+        analysisStatus: NoteAnalysisStatus.ready,
+        clearAnalysisProgress: true,
+      );
+      await LocalDatabaseService.instance.saveNote(restored);
+      if (!mounted) return;
+      _updateNoteInList(restored);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Rianalisi fallita: $e')),
+      );
+    }
+  }
+
   Future<void> _openNoteDetail(AudioNote note) async {
     if (note.isProcessing) return;
 
@@ -699,6 +849,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
           note: note,
           onDelete: () => _deleteNote(note),
           onRetry: note.isFailed ? () => _retryAnalysis(note) : null,
+          onReanalyze: note.isFailed ? null : () => _reanalyzeNote(note),
         ),
       ),
     );

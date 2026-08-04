@@ -19,7 +19,7 @@ class LocalDatabaseService {
 
     _db = await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE audio_notes (
@@ -36,7 +36,11 @@ class LocalDatabaseService {
             analysis_status TEXT NOT NULL DEFAULT 'ready',
             structured_json TEXT NOT NULL DEFAULT '{}',
             upload_session_id TEXT,
-            uploaded_chunks INTEGER NOT NULL DEFAULT 0
+            uploaded_chunks INTEGER NOT NULL DEFAULT 0,
+            transcript_segments TEXT NOT NULL DEFAULT '',
+            analysis_phase TEXT,
+            analysis_current INTEGER NOT NULL DEFAULT 0,
+            analysis_total INTEGER NOT NULL DEFAULT 0
           )
         ''');
         await _createChatTable(db);
@@ -72,6 +76,20 @@ class LocalDatabaseService {
           );
           await db.execute(
             'ALTER TABLE audio_notes ADD COLUMN uploaded_chunks INTEGER NOT NULL DEFAULT 0',
+          );
+        }
+        if (oldVersion < 7) {
+          await db.execute(
+            "ALTER TABLE audio_notes ADD COLUMN transcript_segments TEXT NOT NULL DEFAULT ''",
+          );
+          await db.execute(
+            'ALTER TABLE audio_notes ADD COLUMN analysis_phase TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE audio_notes ADD COLUMN analysis_current INTEGER NOT NULL DEFAULT 0',
+          );
+          await db.execute(
+            'ALTER TABLE audio_notes ADD COLUMN analysis_total INTEGER NOT NULL DEFAULT 0',
           );
         }
       },

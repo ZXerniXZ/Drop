@@ -1,5 +1,26 @@
 import 'note_structured_data.dart';
 import 'note_tags_config.dart';
+import 'transcript_segment.dart';
+
+/// Fase dell'elaborazione mostrata nella barra di avanzamento.
+enum NoteAnalysisPhase {
+  uploading('uploading', 'Caricamento audio'),
+  transcribing('transcribing', 'Trascrizione'),
+  analyzing('analyzing', 'Analisi AI');
+
+  const NoteAnalysisPhase(this.dbValue, this.label);
+
+  final String dbValue;
+  final String label;
+
+  static NoteAnalysisPhase? fromString(String? value) {
+    if (value == null || value.isEmpty) return null;
+    for (final phase in NoteAnalysisPhase.values) {
+      if (phase.dbValue == value) return phase;
+    }
+    return null;
+  }
+}
 
 enum NoteAnalysisStatus {
   processing('processing'),
@@ -35,6 +56,10 @@ class AudioNote {
     this.structuredData = const NoteStructuredData(),
     this.uploadSessionId,
     this.uploadedChunks = 0,
+    this.transcriptSegments = const [],
+    this.analysisPhase,
+    this.analysisCurrent = 0,
+    this.analysisTotal = 0,
   });
 
   final String id;
@@ -51,10 +76,23 @@ class AudioNote {
   final NoteStructuredData structuredData;
   final String? uploadSessionId;
   final int uploadedChunks;
+  final List<TranscriptSegment> transcriptSegments;
+  final NoteAnalysisPhase? analysisPhase;
+  final int analysisCurrent;
+  final int analysisTotal;
 
   bool get isProcessing => analysisStatus.isProcessing;
 
   bool get isFailed => analysisStatus == NoteAnalysisStatus.failed;
+
+  bool get hasKaraoke => transcriptSegments.isNotEmpty;
+
+  /// Avanzamento fra 0 e 1, null quando la fase non e' quantificabile e la
+  /// barra deve restare indeterminata.
+  double? get analysisFraction {
+    if (analysisTotal <= 0) return null;
+    return (analysisCurrent / analysisTotal).clamp(0.0, 1.0);
+  }
 
   String get searchableText =>
       '$title $tag $transcription $summary $rawTranscription'.toLowerCase();
@@ -101,6 +139,11 @@ class AudioNote {
     String? uploadSessionId,
     int? uploadedChunks,
     bool clearUploadSession = false,
+    List<TranscriptSegment>? transcriptSegments,
+    NoteAnalysisPhase? analysisPhase,
+    int? analysisCurrent,
+    int? analysisTotal,
+    bool clearAnalysisProgress = false,
   }) {
     return AudioNote(
       id: id ?? this.id,
@@ -118,6 +161,14 @@ class AudioNote {
       uploadSessionId:
           clearUploadSession ? null : (uploadSessionId ?? this.uploadSessionId),
       uploadedChunks: uploadedChunks ?? this.uploadedChunks,
+      transcriptSegments: transcriptSegments ?? this.transcriptSegments,
+      analysisPhase: clearAnalysisProgress
+          ? null
+          : (analysisPhase ?? this.analysisPhase),
+      analysisCurrent:
+          clearAnalysisProgress ? 0 : (analysisCurrent ?? this.analysisCurrent),
+      analysisTotal:
+          clearAnalysisProgress ? 0 : (analysisTotal ?? this.analysisTotal),
     );
   }
 
@@ -155,6 +206,9 @@ class AudioNote {
       tag: tag,
       analysisStatus: NoteAnalysisStatus.ready,
       structuredData: NoteStructuredData.fromResponse(data),
+      transcriptSegments:
+          TranscriptSegment.listFromResponse(data['transcript_segments']),
+      durationSeconds: (data['audio_duration'] as num?)?.round() ?? 0,
     );
   }
 
@@ -177,6 +231,14 @@ class AudioNote {
       ),
       uploadSessionId: map['upload_session_id'] as String?,
       uploadedChunks: map['uploaded_chunks'] as int? ?? 0,
+      transcriptSegments: TranscriptSegment.listFromJsonString(
+        map['transcript_segments'] as String?,
+      ),
+      analysisPhase: NoteAnalysisPhase.fromString(
+        map['analysis_phase'] as String?,
+      ),
+      analysisCurrent: map['analysis_current'] as int? ?? 0,
+      analysisTotal: map['analysis_total'] as int? ?? 0,
     );
   }
 
@@ -196,6 +258,11 @@ class AudioNote {
       'structured_json': structuredData.toJsonString(),
       'upload_session_id': uploadSessionId,
       'uploaded_chunks': uploadedChunks,
+      'transcript_segments':
+          TranscriptSegment.listToJsonString(transcriptSegments),
+      'analysis_phase': analysisPhase?.dbValue,
+      'analysis_current': analysisCurrent,
+      'analysis_total': analysisTotal,
     };
   }
 }
