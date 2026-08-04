@@ -17,7 +17,7 @@ const openRouterTranscriptionsUrl =
     'https://openrouter.ai/api/v1/audio/transcriptions';
 const openRouterModelsUrl = 'https://openrouter.ai/api/v1/models';
 const whisperModel = 'openai/whisper-large-v3';
-const defaultLlmModel = 'google/gemini-3.5-flash';
+const defaultLlmModel = 'google/gemini-3.6-flash';
 
 const transcriptionTimeout = Duration(seconds: 600);
 const llmTimeout = Duration(seconds: 300);

@@ -1,6 +1,6 @@
 class AiPreferences {
   const AiPreferences({
-    this.model = AiModel.gemini35Flash,
+    this.model = AiModel.gemini36Flash,
     this.transcriptionLanguage = TranscriptionLanguage.automatic,
     this.customPrompt = '',
   });
@@ -36,7 +36,7 @@ enum AiModel {
   static AiModel fromKey(String? key) {
     return AiModel.values.firstWhere(
       (m) => m.name == key,
-      orElse: () => AiModel.gemini35Flash,
+      orElse: () => AiModel.gemini36Flash,
     );
   }
 }
