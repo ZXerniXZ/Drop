@@ -47,9 +47,9 @@ Analizza la trascrizione grezza e restituisci SOLO un oggetto JSON valido con qu
     "tags": "UNO dalla lista consentita"
   }},
   "speaker_view": [
-    {{"speaker": "Speaker 0", "text": "testo pronunciato", "time": "00:00"}}
+    {{"speaker": "Speaker 0", "text": "testo INTEGRALE del turno, parola per parola", "time": "00:00"}}
   ],
-  "formatted_transcript": "trascrizione formattata con etichette speaker per lettura lineare"
+  "formatted_transcript": "trascrizione formattata con etichette speaker, testo integrale"
 }}
 
 Tag consentiti (scegline esattamente UNO per key_data.tags): {tag_list}
@@ -57,7 +57,17 @@ Tag consentiti (scegline esattamente UNO per key_data.tags): {tag_list}
 Regole:
 - title: sintetico, riflette il contenuto principale, senza data/ora.
 - highlights: 2-8 elementi concreti e actionable quando possibile.
-- speaker_view: separa logicamente il dialogo per speaker; se monologo usa Speaker 0.
+- summary: e' l'UNICO campo in cui puoi riassumere.
+- speaker_view: trascrizione VERBATIM spezzata per turno di parola.
+  * Un blocco per ogni intervento (quando cambia chi parla), NON un riassunto per speaker.
+  * "text" deve riportare le parole esatte della trascrizione grezza, senza parafrasare,
+    condensare, omettere o correggere il senso.
+  * Copri l'intera trascrizione: la concatenazione dei "text" deve ricostruire
+    sostanzialmente tutto il contenuto parlato.
+  * Se monologo: usa Speaker 0 con uno o piu' blocchi sequenziali.
+  * "time" e' il timestamp di inizio del turno (MM:SS) se deducibile, altrimenti "00:00".
+- formatted_transcript: stessa regola di fedelta' della speaker_view, in forma lineare
+  con etichette speaker (es. "[Speaker 0 - 00:00]: ...").
 - key_data.tags: DEVE essere uno dei tag consentiti sopra.
 - Rispondi SOLO con JSON, senza markdown fence o testo extra."""
 
@@ -207,7 +217,11 @@ def _parse_llm_json(
 
 
 def _build_user_prompt(transcript: str, custom_prompt: str | None) -> str:
-    parts = [f"Trascrizione grezza:\n\n{transcript}"]
+    parts = [
+        "Trascrizione grezza (da riportare verbatim in speaker_view e "
+        "formatted_transcript; non riassumere quei campi):\n\n",
+        transcript,
+    ]
     if custom_prompt and custom_prompt.strip():
         parts.append(
             f"\n\nIstruzioni aggiuntive dell'utente:\n{custom_prompt.strip()}"
