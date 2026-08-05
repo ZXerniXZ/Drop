@@ -6,7 +6,7 @@ load_dotenv()
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_LLM_MODEL = os.getenv(
-    "OPENROUTER_LLM_MODEL", "google/gemini-3.5-flash"
+    "OPENROUTER_LLM_MODEL", "google/gemini-3.6-flash"
 )
 TRANSCRIPTION_TIMEOUT_SECONDS = float(
     os.getenv("TRANSCRIPTION_TIMEOUT_SECONDS", "600")

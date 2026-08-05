@@ -17,7 +17,7 @@ const openRouterTranscriptionsUrl =
     'https://openrouter.ai/api/v1/audio/transcriptions';
 const openRouterModelsUrl = 'https://openrouter.ai/api/v1/models';
 const whisperModel = 'openai/whisper-large-v3';
-const defaultLlmModel = 'google/gemini-3.5-flash';
+const defaultLlmModel = 'google/gemini-3.6-flash';
 
 const transcriptionTimeout = Duration(seconds: 600);
 const llmTimeout = Duration(seconds: 300);
@@ -28,6 +28,10 @@ const maxTranscriptChars = 12000;
 const headTailChars = 4000;
 
 const _modelAliases = <String, String>{
+  'gemini_36_flash': 'google/gemini-3.6-flash',
+  'gemini36flash': 'google/gemini-3.6-flash',
+  'gemini 3.6 flash': 'google/gemini-3.6-flash',
+  'google/gemini-3.6-flash': 'google/gemini-3.6-flash',
   'gemini_35_flash': 'google/gemini-3.5-flash',
   'gemini35flash': 'google/gemini-3.5-flash',
   'gemini 3.5 flash': 'google/gemini-3.5-flash',
@@ -142,6 +146,7 @@ class OpenRouterClient {
     required String apiKey,
     required AiPreferences prefs,
     required List<String> availableTags,
+    List<Map<String, dynamic>>? segments,
   }) async {
     final tagsPool = availableTags.where((t) => t.trim().isNotEmpty).toList();
     final pool = tagsPool.isEmpty ? defaultAnalysisTags : tagsPool;
@@ -160,6 +165,7 @@ class OpenRouterClient {
             transcript: transcript,
             customPrompt: prefs.customPrompt,
             language: prefs.transcriptionLanguage.name,
+            segments: segments,
           ),
         },
       ],
@@ -191,7 +197,12 @@ class OpenRouterClient {
       throw Exception('Unexpected OpenRouter chat response format');
     }
 
-    return parseLlmAnalysisJson(content, pool);
+    return parseLlmAnalysisJson(
+      content,
+      pool,
+      transcript: transcript,
+      segments: segments,
+    );
   }
 
   Future<Map<String, dynamic>> processAudioFile({

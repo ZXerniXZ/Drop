@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'speaker_assembly.dart' as assembly;
+
 /// Parses the first JSON object from LLM output (handles trailing text / fences).
 Map<String, dynamic> loadFirstJsonObject(String content) {
   var text = content.trim();
@@ -140,8 +142,10 @@ String speakerViewToFormatted(List<Map<String, String>> speakerView) {
 
 Map<String, dynamic> parseLlmAnalysisJson(
   String content,
-  List<String> allowedTags,
-) {
+  List<String> allowedTags, {
+  String transcript = '',
+  List<Map<String, dynamic>>? segments,
+}) {
   final data = loadFirstJsonObject(content);
   final pool = allowedTags.where((t) => t.trim().isNotEmpty).toList();
   final tags = pool.isEmpty ? defaultAnalysisTagsForParser : pool;
@@ -150,17 +154,23 @@ Map<String, dynamic> parseLlmAnalysisJson(
   final summary = data['summary']?.toString().trim() ?? '';
   final highlights = asStringList(data['highlights']);
   final keyData = normalizeKeyData(data['key_data'], tags);
-  final speakerView = normalizeSpeakerView(data['speaker_view']);
-
-  var formatted = data['formatted_transcript']?.toString().trim() ?? '';
-  if (formatted.isEmpty) {
-    formatted = speakerViewToFormatted(speakerView);
-  }
 
   if (summary.isEmpty) {
     throw FormatException('LLM response missing summary');
   }
   if (title.isEmpty) title = 'Nota vocale';
+
+  // Il testo della speaker_view non viene dall'LLM: si monta da Whisper.
+  late final List<Map<String, String>> speakerView;
+  late final String formatted;
+  if (segments != null && segments.isNotEmpty) {
+    speakerView = assembly.buildSpeakerView(segments, data['speaker_ids']);
+    formatted = assembly.speakerViewToFormatted(speakerView);
+  } else {
+    final fallback = assembly.buildFromRawTranscript(transcript);
+    speakerView = fallback.speakerView;
+    formatted = fallback.formatted;
+  }
 
   return {
     'title': title.length > 80 ? title.substring(0, 80) : title,
@@ -168,6 +178,7 @@ Map<String, dynamic> parseLlmAnalysisJson(
     'highlights': highlights,
     'key_data': keyData,
     'speaker_view': speakerView,
-    'formatted_transcript': formatted.isNotEmpty ? formatted : summary,
+    'formatted_transcript':
+        formatted.isNotEmpty ? formatted : (transcript.isNotEmpty ? transcript : summary),
   };
 }
