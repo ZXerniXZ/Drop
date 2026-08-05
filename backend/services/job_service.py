@@ -192,6 +192,7 @@ async def run_upload_job(
             custom_prompt=custom_prompt,
             language=language,
             available_tags=available_tags,
+            segments=transcript_segments,
         )
         note_id = _save_note_to_db(
             user_id,

@@ -49,12 +49,24 @@ Extra commentary after JSON''';
 
     test('parseLlmAnalysisJson normalizes output', () {
       const raw = '''
-{"title":"Test","summary":"## Overview\\nOk","highlights":["a"],"key_data":{"tags":"Meeting"},"speaker_view":[],"formatted_transcript":"t"}''';
+{"title":"Test","summary":"## Overview\\nOk","highlights":["a"],"key_data":{"tags":"Meeting"},"speaker_ids":[0,1]}''';
 
-      final result = parseLlmAnalysisJson(raw, ['Meeting', 'Memo']);
+      final result = parseLlmAnalysisJson(
+        raw,
+        ['Meeting', 'Memo'],
+        transcript: 'Ciao mondo',
+        segments: [
+          {'start': 0.0, 'end': 1.0, 'text': 'Ciao'},
+          {'start': 1.0, 'end': 2.0, 'text': 'mondo'},
+        ],
+      );
       expect(result['title'], 'Test');
       expect(result['key_data'], isA<Map>());
       expect((result['key_data'] as Map)['tags'], 'Meeting');
+      final view = result['speaker_view'] as List;
+      expect(view.length, 2);
+      expect((view[0] as Map)['text'], 'Ciao');
+      expect((view[1] as Map)['text'], 'mondo');
     });
   });
 }

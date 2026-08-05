@@ -10,6 +10,12 @@ from config import (
     OPENROUTER_API_KEY,
     OPENROUTER_LLM_MODEL,
 )
+from services.speaker_assembly import (
+    build_from_raw_transcript,
+    build_speaker_view,
+    format_segments_for_diarization,
+    speaker_view_to_formatted,
+)
 
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 APP_REFERER = "https://github.com/ZXerniXZ/Drop"
@@ -35,7 +41,7 @@ MODEL_ALIASES: dict[str, str] = {
 }
 
 SYSTEM_PROMPT_TEMPLATE = """Sei l'assistente di un'app di note vocali stile Plaud Note.
-Analizza la trascrizione grezza e restituisci SOLO un oggetto JSON valido con questo schema esatto:
+Analizza la trascrizione e restituisci SOLO un oggetto JSON valido con questo schema esatto:
 
 {{
   "title": "titolo breve e descrittivo della nota (max 60 caratteri, in italiano)",
@@ -46,10 +52,7 @@ Analizza la trascrizione grezza e restituisci SOLO un oggetto JSON valido con qu
     "participants": ["nome o Speaker 0", "Speaker 1"],
     "tags": "UNO dalla lista consentita"
   }},
-  "speaker_view": [
-    {{"speaker": "Speaker 0", "text": "testo INTEGRALE del turno, parola per parola", "time": "00:00"}}
-  ],
-  "formatted_transcript": "trascrizione formattata con etichette speaker, testo integrale"
+  "speaker_ids": [0, 0, 1, 1, 0]
 }}
 
 Tag consentiti (scegline esattamente UNO per key_data.tags): {tag_list}
@@ -57,18 +60,13 @@ Tag consentiti (scegline esattamente UNO per key_data.tags): {tag_list}
 Regole:
 - title: sintetico, riflette il contenuto principale, senza data/ora.
 - highlights: 2-8 elementi concreti e actionable quando possibile.
-- summary: e' l'UNICO campo in cui puoi riassumere.
-- speaker_view: trascrizione VERBATIM spezzata per turno di parola.
-  * Un blocco per ogni intervento (quando cambia chi parla), NON un riassunto per speaker.
-  * "text" deve riportare le parole esatte della trascrizione grezza, senza parafrasare,
-    condensare, omettere o correggere il senso.
-  * Copri l'intera trascrizione: la concatenazione dei "text" deve ricostruire
-    sostanzialmente tutto il contenuto parlato.
-  * Se monologo: usa Speaker 0 con uno o piu' blocchi sequenziali.
-  * "time" e' il timestamp di inizio del turno (MM:SS) se deducibile, altrimenti "00:00".
-- formatted_transcript: stessa regola di fedelta' della speaker_view, in forma lineare
-  con etichette speaker (es. "[Speaker 0 - 00:00]: ...").
+- summary: puoi riassumere liberamente.
+- speaker_ids: diarizzazione COMPATTA. Un intero per ogni segmento numerato ricevuto
+  (stessa lunghezza dell'elenco). 0 = Speaker 0, 1 = Speaker 1, ecc.
+  NON riscrivere il testo dei segmenti: il server lo monta da Whisper.
+  Se monologo o non sai distinguere, usa tutti 0.
 - key_data.tags: DEVE essere uno dei tag consentiti sopra.
+- NON includere speaker_view ne' formatted_transcript.
 - Rispondi SOLO con JSON, senza markdown fence o testo extra."""
 
 DEFAULT_TAGS = [
@@ -130,25 +128,6 @@ def _as_string_list(value: Any) -> list[str]:
     return [str(item).strip() for item in value if str(item).strip()]
 
 
-def _normalize_speaker_view(value: Any) -> list[dict[str, str]]:
-    if not isinstance(value, list):
-        return []
-    blocks: list[dict[str, str]] = []
-    for item in value:
-        if not isinstance(item, dict):
-            continue
-        speaker = str(item.get("speaker", "Speaker 0")).strip() or "Speaker 0"
-        text = str(item.get("text", "")).strip()
-        if not text:
-            continue
-        block = {"speaker": speaker, "text": text}
-        time_value = item.get("time")
-        if time_value:
-            block["time"] = str(time_value).strip()
-        blocks.append(block)
-    return blocks
-
-
 def _normalize_key_data(
     value: Any, allowed_tags: list[str] | None = None
 ) -> dict[str, Any]:
@@ -174,17 +153,6 @@ def _normalize_key_data(
     }
 
 
-def _speaker_view_to_formatted(speaker_view: list[dict[str, str]]) -> str:
-    if not speaker_view:
-        return ""
-    parts: list[str] = []
-    for block in speaker_view:
-        label = block["speaker"]
-        time_suffix = f" [{block['time']}]" if block.get("time") else ""
-        parts.append(f"{label}{time_suffix}: {block['text']}")
-    return "\n\n".join(parts)
-
-
 def _parse_llm_json(
     content: str, allowed_tags: list[str] | None = None
 ) -> dict[str, Any]:
@@ -194,11 +162,6 @@ def _parse_llm_json(
     summary = str(data.get("summary", "")).strip()
     highlights = _as_string_list(data.get("highlights"))
     key_data = _normalize_key_data(data.get("key_data"), allowed_tags)
-    speaker_view = _normalize_speaker_view(data.get("speaker_view"))
-
-    formatted = str(data.get("formatted_transcript", "")).strip()
-    if not formatted:
-        formatted = _speaker_view_to_formatted(speaker_view)
 
     if not summary:
         raise ValueError("LLM response missing summary")
@@ -211,17 +174,29 @@ def _parse_llm_json(
         "summary": summary,
         "highlights": highlights,
         "key_data": key_data,
-        "speaker_view": speaker_view,
-        "formatted_transcript": formatted or summary,
+        "speaker_ids": data.get("speaker_ids"),
     }
 
 
-def _build_user_prompt(transcript: str, custom_prompt: str | None) -> str:
+def _build_user_prompt(
+    transcript: str,
+    custom_prompt: str | None,
+    *,
+    segments: list[dict[str, Any]] | None = None,
+) -> str:
     parts = [
-        "Trascrizione grezza (da riportare verbatim in speaker_view e "
-        "formatted_transcript; non riassumere quei campi):\n\n",
+        "Trascrizione grezza (per titolo, summary, highlights):\n\n",
         transcript,
     ]
+    if segments:
+        numbered = format_segments_for_diarization(segments)
+        parts.append(
+            f"\n\nCi sono {len(segments)} segmenti Whisper. Restituisci "
+            f"speaker_ids con esattamente {len(segments)} interi (0-based). "
+            "Non riscrivere il testo dei segmenti.\n\n"
+            f"Segmenti numerati:\n\n{numbered}"
+        )
+
     if custom_prompt and custom_prompt.strip():
         parts.append(
             f"\n\nIstruzioni aggiuntive dell'utente:\n{custom_prompt.strip()}"
@@ -235,6 +210,19 @@ def _truncate_transcript(text: str) -> str:
     return text[:MAX_TRANSCRIPT_CHARS] + "\n\n[... trascrizione troncata per analisi LLM ...]"
 
 
+def _assemble_speaker_fields(
+    transcript: str,
+    *,
+    segments: list[dict[str, Any]] | None,
+    speaker_ids: Any,
+) -> tuple[list[dict[str, str]], str]:
+    if segments:
+        speaker_view = build_speaker_view(segments, speaker_ids)
+        if speaker_view:
+            return speaker_view, speaker_view_to_formatted(speaker_view)
+    return build_from_raw_transcript(transcript)
+
+
 async def process_transcript(
     transcript: str,
     *,
@@ -242,12 +230,17 @@ async def process_transcript(
     custom_prompt: str | None = None,
     language: str | None = None,
     available_tags: list[str] | None = None,
+    segments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if not OPENROUTER_API_KEY:
         raise ValueError("OPENROUTER_API_KEY is not configured")
 
     resolved_model = resolve_llm_model(model)
-    user_prompt = _build_user_prompt(_truncate_transcript(transcript), custom_prompt)
+    user_prompt = _build_user_prompt(
+        _truncate_transcript(transcript),
+        custom_prompt,
+        segments=segments,
+    )
     tags_pool = [t.strip() for t in (available_tags or DEFAULT_TAGS) if t.strip()]
 
     if language and language.strip().lower() not in {"automatic", "automatico", ""}:
@@ -288,4 +281,12 @@ async def process_transcript(
     except (KeyError, IndexError) as exc:
         raise ValueError("Unexpected OpenRouter chat response format") from exc
 
-    return _parse_llm_json(content, tags_pool)
+    parsed = _parse_llm_json(content, tags_pool)
+    speaker_view, formatted = _assemble_speaker_fields(
+        transcript,
+        segments=segments,
+        speaker_ids=parsed.pop("speaker_ids", None),
+    )
+    parsed["speaker_view"] = speaker_view
+    parsed["formatted_transcript"] = formatted or transcript
+    return parsed

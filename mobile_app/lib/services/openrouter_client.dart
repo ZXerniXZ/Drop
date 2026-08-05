@@ -146,6 +146,7 @@ class OpenRouterClient {
     required String apiKey,
     required AiPreferences prefs,
     required List<String> availableTags,
+    List<Map<String, dynamic>>? segments,
   }) async {
     final tagsPool = availableTags.where((t) => t.trim().isNotEmpty).toList();
     final pool = tagsPool.isEmpty ? defaultAnalysisTags : tagsPool;
@@ -164,6 +165,7 @@ class OpenRouterClient {
             transcript: transcript,
             customPrompt: prefs.customPrompt,
             language: prefs.transcriptionLanguage.name,
+            segments: segments,
           ),
         },
       ],
@@ -195,7 +197,12 @@ class OpenRouterClient {
       throw Exception('Unexpected OpenRouter chat response format');
     }
 
-    return parseLlmAnalysisJson(content, pool);
+    return parseLlmAnalysisJson(
+      content,
+      pool,
+      transcript: transcript,
+      segments: segments,
+    );
   }
 
   Future<Map<String, dynamic>> processAudioFile({

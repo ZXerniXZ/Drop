@@ -1,3 +1,5 @@
+import 'speaker_assembly.dart';
+
 const openRouterAppReferer = 'https://github.com/ZXerniXZ/Drop';
 const openRouterAppTitle = 'Drop';
 
@@ -13,7 +15,7 @@ const defaultAnalysisTags = [
 ];
 
 const analysisSystemPromptTemplate = '''Sei l'assistente di un'app di note vocali stile Plaud Note.
-Analizza la trascrizione grezza e restituisci SOLO un oggetto JSON valido con questo schema esatto:
+Analizza la trascrizione e restituisci SOLO un oggetto JSON valido con questo schema esatto:
 
 {
   "title": "titolo breve e descrittivo della nota (max 60 caratteri, in italiano)",
@@ -24,10 +26,7 @@ Analizza la trascrizione grezza e restituisci SOLO un oggetto JSON valido con qu
     "participants": ["nome o Speaker 0", "Speaker 1"],
     "tags": "UNO dalla lista consentita"
   },
-  "speaker_view": [
-    {"speaker": "Speaker 0", "text": "testo INTEGRALE del turno, parola per parola", "time": "00:00"}
-  ],
-  "formatted_transcript": "trascrizione formattata con etichette speaker, testo integrale"
+  "speaker_ids": [0, 0, 1, 1, 0]
 }
 
 Tag consentiti (scegline esattamente UNO per key_data.tags): {tag_list}
@@ -35,18 +34,13 @@ Tag consentiti (scegline esattamente UNO per key_data.tags): {tag_list}
 Regole:
 - title: sintetico, riflette il contenuto principale, senza data/ora.
 - highlights: 2-8 elementi concreti e actionable quando possibile.
-- summary: e' l'UNICO campo in cui puoi riassumere.
-- speaker_view: trascrizione VERBATIM spezzata per turno di parola.
-  * Un blocco per ogni intervento (quando cambia chi parla), NON un riassunto per speaker.
-  * "text" deve riportare le parole esatte della trascrizione grezza, senza parafrasare,
-    condensare, omettere o correggere il senso.
-  * Copri l'intera trascrizione: la concatenazione dei "text" deve ricostruire
-    sostanzialmente tutto il contenuto parlato.
-  * Se monologo: usa Speaker 0 con uno o piu' blocchi sequenziali.
-  * "time" e' il timestamp di inizio del turno (MM:SS) se deducibile, altrimenti "00:00".
-- formatted_transcript: stessa regola di fedelta' della speaker_view, in forma lineare
-  con etichette speaker (es. "[Speaker 0 - 00:00]: ...").
+- summary: puoi riassumere liberamente.
+- speaker_ids: diarizzazione COMPATTA. Un intero per ogni segmento numerato ricevuto
+  (stessa lunghezza dell'elenco). 0 = Speaker 0, 1 = Speaker 1, ecc.
+  NON riscrivere il testo dei segmenti: il client lo monta da Whisper.
+  Se monologo o non sai distinguere, usa tutti 0.
 - key_data.tags: DEVE essere uno dei tag consentiti sopra.
+- NON includere speaker_view ne' formatted_transcript.
 - Rispondi SOLO con JSON, senza markdown fence o testo extra.''';
 
 const noteChatSystemPrompt = '''Sei Drop, assistente AI per una singola nota vocale.
@@ -63,10 +57,17 @@ String buildAnalysisUserPrompt({
   required String transcript,
   String? customPrompt,
   String? language,
+  List<Map<String, dynamic>>? segments,
 }) {
-  var prompt =
-      'Trascrizione grezza (da riportare verbatim in speaker_view e '
-      'formatted_transcript; non riassumere quei campi):\n\n$transcript';
+  var prompt = 'Trascrizione grezza (per titolo, summary, highlights):\n\n$transcript';
+  if (segments != null && segments.isNotEmpty) {
+    final numbered = formatSegmentsForDiarization(segments);
+    prompt +=
+        '\n\nCi sono ${segments.length} segmenti Whisper. Restituisci '
+        'speaker_ids con esattamente ${segments.length} interi (0-based). '
+        'Non riscrivere il testo dei segmenti.\n\n'
+        'Segmenti numerati:\n\n$numbered';
+  }
   if (customPrompt != null && customPrompt.trim().isNotEmpty) {
     prompt += '\n\nIstruzioni aggiuntive dell\'utente:\n${customPrompt.trim()}';
   }
