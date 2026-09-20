@@ -6,6 +6,19 @@
 
 :8090 {
 	handle_path /auth/v1/* {
+		# GoTrue's own CORS rejects the apikey/x-client-info headers supabase_flutter
+		# sends, so the browser never gets past the preflight. Answer it here.
+		@preflight method OPTIONS
+		handle @preflight {
+			header {
+				Access-Control-Allow-Origin "*"
+				Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+				Access-Control-Allow-Headers "accept, authorization, apikey, content-type, x-client-info, x-supabase-api-version, x-client-ip"
+				Access-Control-Max-Age "3600"
+			}
+			respond 204
+		}
+
 		reverse_proxy auth:9999 {
 			header_up Host {host}
 			header_up X-Forwarded-Proto https
