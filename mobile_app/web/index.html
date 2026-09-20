@@ -100,6 +100,9 @@
     <span>Nuova versione disponibile</span>
     <button type="button" id="sw-reload">Ricarica</button>
   </div>
+  <!-- supabase_flutter pulls in passkeys_web, whose plugin registration throws
+       unless this SDK defines window.PasskeyAuthenticator before Flutter starts. -->
+  <script src="passkeys_bundle.js"></script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
