@@ -53,7 +53,7 @@ services:
       GOTRUE_DB_NAMESPACE: auth
 
       GOTRUE_SITE_URL: ${SITE_URL:-https://app.drop-prj.xyz}
-      GOTRUE_URI_ALLOW_LIST: ${GOTRUE_URI_ALLOW_LIST:-https://app.drop-prj.xyz,https://app.drop-prj.xyz/**,http://localhost:*,http://127.0.0.1:*,com.drop.plaudclone.drop://**}
+      GOTRUE_URI_ALLOW_LIST: ${GOTRUE_URI_ALLOW_LIST:-https://app.drop-prj.xyz,https://app.drop-prj.xyz/**,https://*.pages.dev,https://*.pages.dev/**,http://localhost:*,http://127.0.0.1:*,com.drop.plaudclone.drop://**}
       GOTRUE_DISABLE_SIGNUP: "false"
 
       GOTRUE_JWT_ADMIN_ROLES: service_role

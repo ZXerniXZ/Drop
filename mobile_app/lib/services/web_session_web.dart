@@ -31,4 +31,8 @@ class WebSession {
 
   static bool get shouldPromptHomeScreenInstall =>
       isIosSafari && !isStandalone;
+
+  static void reload() {
+    web.window.location.reload();
+  }
 }

@@ -6,4 +6,6 @@ class WebSession {
   static bool get isStandalone => false;
 
   static bool get shouldPromptHomeScreenInstall => false;
+
+  static void reload() {}
 }

@@ -1,12 +1,138 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'screens/login_screen.dart';
 import 'screens/recorder_screen.dart';
+import 'services/drop_bootstrap.dart';
 import 'services/supabase_auth_service.dart';
+import 'services/web_session.dart';
 import 'theme/drop_motion.dart';
 import 'theme/drop_theme.dart';
+import 'widgets/drop_logo.dart';
 import 'widgets/ios_install_banner.dart';
+
+class DropBootApp extends StatefulWidget {
+  const DropBootApp({super.key});
+
+  @override
+  State<DropBootApp> createState() => _DropBootAppState();
+}
+
+class _DropBootAppState extends State<DropBootApp> {
+  String? _error;
+  bool _slow = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_start());
+  }
+
+  Future<void> _start() async {
+    final boot = bootstrapDrop();
+    try {
+      await boot.timeout(const Duration(seconds: 8));
+    } on TimeoutException {
+      if (mounted) setState(() => _slow = true);
+      try {
+        await boot.timeout(const Duration(seconds: 20));
+      } on TimeoutException {
+        if (!mounted) return;
+        setState(() {
+          _error = 'Avvio troppo lento. Riprova.';
+        });
+        return;
+      } catch (error, stack) {
+        debugPrint('Drop boot: $error\n$stack');
+        if (!mounted) return;
+        setState(() => _error = 'Drop non si è avviato.');
+        return;
+      }
+    } catch (error, stack) {
+      debugPrint('Drop boot: $error\n$stack');
+      if (!mounted) return;
+      setState(() => _error = 'Drop non si è avviato.');
+      return;
+    }
+    if (!mounted) return;
+    runApp(const DropApp());
+  }
+
+  void _retry() {
+    if (kIsWeb) {
+      WebSession.reload();
+      return;
+    }
+    setState(() {
+      _error = null;
+      _slow = false;
+    });
+    unawaited(_start());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Drop',
+      debugShowCheckedModeBanner: false,
+      theme: DropTheme.dark(),
+      home: Scaffold(
+        backgroundColor: DropColors.darkBackground,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const DropLogo(height: 72),
+                const SizedBox(height: 16),
+                const Text(
+                  'Drop',
+                  style: TextStyle(
+                    color: Color(0xFFF4F4F5),
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                if (_error == null) ...[
+                  if (_slow)
+                    Text(
+                      'Ci sto mettendo più del solito…',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.45),
+                        fontSize: 14,
+                      ),
+                    ),
+                ] else ...[
+                  Text(
+                    _error!,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.7),
+                      fontSize: 14,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextButton(
+                    onPressed: _retry,
+                    child: const Text('Riprova'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class DropApp extends StatefulWidget {
   const DropApp({super.key});

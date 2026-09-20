@@ -11,9 +11,9 @@ _flutter.loader.load({
   onEntrypointLoaded: async function (engineInitializer) {
     try {
       const appRunner = await engineInitializer.initializeEngine();
+      await appRunner.runApp();
       const loading = document.getElementById('loading');
       if (loading) loading.remove();
-      await appRunner.runApp();
     } catch (err) {
       console.error(err);
       const loading = document.getElementById('loading');
