@@ -8,4 +8,6 @@ class WebSession {
   static bool get shouldPromptHomeScreenInstall => false;
 
   static void reload() {}
+
+  static void hideHtmlSplash() {}
 }

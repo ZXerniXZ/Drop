@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'app.dart';
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const DropBootApp());
 }

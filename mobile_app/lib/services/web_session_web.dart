@@ -35,4 +35,8 @@ class WebSession {
   static void reload() {
     web.window.location.reload();
   }
+
+  static void hideHtmlSplash() {
+    web.document.getElementById('loading')?.remove();
+  }
 }

@@ -7,7 +7,6 @@ import '../config/supabase_config.dart';
 import '../utils/drop_platform.dart';
 import '../utils/init_sqflite.dart';
 import 'app_preferences_service.dart';
-import 'http_client.dart';
 import 'local_database_service.dart';
 import 'recording_foreground_service.dart';
 
@@ -35,7 +34,6 @@ Future<void> bootstrapDrop() async {
     Supabase.initialize(
       url: SupabaseConfig.url,
       publishableKey: SupabaseConfig.anonKey,
-      httpClient: createHttpClient(),
       authOptions: FlutterAuthClientOptions(
         authFlowType: AuthFlowType.pkce,
         detectSessionInUri: !DropPlatform.isWeb,

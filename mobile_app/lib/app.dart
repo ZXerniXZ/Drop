@@ -28,7 +28,10 @@ class _DropBootAppState extends State<DropBootApp> {
   @override
   void initState() {
     super.initState();
-    unawaited(_start());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WebSession.hideHtmlSplash();
+      unawaited(_start());
+    });
   }
 
   Future<void> _start() async {
