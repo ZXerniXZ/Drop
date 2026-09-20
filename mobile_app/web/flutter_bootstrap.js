@@ -9,25 +9,26 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+function bootStatus(message) {
+  const el = document.getElementById('boot-status');
+  if (el) el.textContent = message;
+}
+
 _flutter.loader.load({
   config: {
     canvasKitBaseUrl: "canvaskit/",
   },
   onEntrypointLoaded: async function (engineInitializer) {
     try {
-      const appRunner = await engineInitializer.initializeEngine();
-      const running = appRunner.runApp();
-      if (running && typeof running.then === 'function') {
-        running.catch(function (err) {
-          console.error(err);
-        });
-      }
+      bootStatus('Avvio…');
+      const host = document.getElementById('flutter-host');
+      const appRunner = await engineInitializer.initializeEngine({
+        hostElement: host || undefined,
+      });
+      await appRunner.runApp();
     } catch (err) {
       console.error(err);
-      const loading = document.getElementById('loading');
-      if (loading) {
-        loading.innerHTML = '<p>Drop non si e avviato. Ricarica la pagina.</p>';
-      }
+      bootStatus('Drop non si e avviato. Ricarica la pagina.');
     }
   },
 });

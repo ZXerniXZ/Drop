@@ -27,6 +27,11 @@
       color: #F4F4F5;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
+    #flutter-host {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+    }
     #loading {
       position: fixed;
       inset: 0;
@@ -49,6 +54,11 @@
       font-size: 18px;
       letter-spacing: -0.3px;
       font-weight: 600;
+    }
+    #boot-status {
+      font-size: 13px;
+      font-weight: 400;
+      color: rgba(244,244,245,0.45);
     }
     #sw-update {
       position: fixed;
@@ -80,9 +90,11 @@
   </style>
 </head>
 <body>
+  <div id="flutter-host"></div>
   <div id="loading">
     <img src="icons/Icon-192.png" alt="">
     <p>Drop</p>
+    <p id="boot-status"></p>
   </div>
   <div id="sw-update" hidden>
     <span>Nuova versione disponibile</span>
