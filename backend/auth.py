@@ -23,41 +23,53 @@ def _get_jwks_client() -> PyJWKClient | None:
 
 
 class JwksUnavailableError(Exception):
-    """Le chiavi pubbliche Supabase non sono raggiungibili."""
+    """Le chiavi pubbliche Auth non sono raggiungibili."""
 
 
-def _decode_token(token: str) -> dict:
-    jwks = _get_jwks_client()
-    jwks_unavailable = False
-    if jwks is not None:
-        try:
-            signing_key = jwks.get_signing_key_from_jwt(token)
-            return jwt.decode(
-                token,
-                signing_key.key,
-                algorithms=["ES256", "RS256"],
-                audience="authenticated",
-            )
-        except jwt.InvalidTokenError:
-            pass
-        except PyJWKClientError:
-            # Rete o DNS non disponibili: non e' un token invalido, quindi
-            # senza fallback va segnalato come indisponibilita' temporanea.
-            jwks_unavailable = True
-
-    if not SUPABASE_JWT_SECRET:
-        if jwks_unavailable:
-            raise JwksUnavailableError(
-                "Cannot reach Supabase public keys and no JWT secret is configured"
-            )
-        raise jwt.InvalidTokenError("JWT verification not configured")
-
+def _decode_hs256(token: str) -> dict:
     return jwt.decode(
         token,
         SUPABASE_JWT_SECRET,
         algorithms=["HS256"],
         audience="authenticated",
     )
+
+
+def _decode_jwks(token: str) -> dict:
+    jwks = _get_jwks_client()
+    if jwks is None:
+        raise jwt.InvalidTokenError("JWT verification not configured")
+    signing_key = jwks.get_signing_key_from_jwt(token)
+    return jwt.decode(
+        token,
+        signing_key.key,
+        algorithms=["ES256", "RS256"],
+        audience="authenticated",
+    )
+
+
+def _decode_token(token: str) -> dict:
+    # GoTrue self-host firma HS256 con JWT_SECRET (stesso valore di
+    # SUPABASE_JWT_SECRET). JWKS resta solo come fallback per token Cloud.
+    hs256_error: jwt.InvalidTokenError | None = None
+    if SUPABASE_JWT_SECRET:
+        try:
+            return _decode_hs256(token)
+        except jwt.ExpiredSignatureError:
+            raise
+        except jwt.InvalidTokenError as exc:
+            hs256_error = exc
+            if not SUPABASE_URL:
+                raise
+
+    try:
+        return _decode_jwks(token)
+    except PyJWKClientError as exc:
+        if hs256_error is not None:
+            raise hs256_error from exc
+        raise JwksUnavailableError(
+            "Cannot reach Auth public keys and no JWT secret is configured"
+        ) from exc
 
 
 async def get_current_user(
@@ -71,7 +83,7 @@ async def get_current_user(
     if not SUPABASE_JWT_SECRET and not SUPABASE_URL:
         raise HTTPException(
             status_code=500,
-            detail="Supabase JWT verification is not configured",
+            detail="Auth JWT verification is not configured",
         )
 
     token = credentials.credentials

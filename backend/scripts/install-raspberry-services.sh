@@ -14,7 +14,6 @@ fi
 install -m 644 "$BACKEND_DIR/systemd/drop-backend.service" "$SYSTEMD_DIR/drop-backend.service"
 install -m 644 "$BACKEND_DIR/systemd/drop-healthcheck.service" "$SYSTEMD_DIR/drop-healthcheck.service"
 install -m 644 "$BACKEND_DIR/systemd/drop-healthcheck.timer" "$SYSTEMD_DIR/drop-healthcheck.timer"
-chmod 755 "$BACKEND_DIR/scripts/healthcheck.sh"
 
 # cloudflared: riavvio automatico + HTTP/2 (più stabile per upload medi)
 mkdir -p /etc/systemd/system/cloudflared.service.d
@@ -34,6 +33,8 @@ fi
 
 chmod 755 "$BACKEND_DIR/scripts/healthcheck.sh"
 chmod 755 "$BACKEND_DIR/scripts/test_chunked_upload.sh"
+chmod 755 "$BACKEND_DIR/scripts/gen-jwt-keys.py"
+chmod 755 "$BACKEND_DIR/scripts/remap-note-user.sh"
 
 systemctl daemon-reload
 systemctl enable docker cloudflared drop-backend.service drop-healthcheck.timer

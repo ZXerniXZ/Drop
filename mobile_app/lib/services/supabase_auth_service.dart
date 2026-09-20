@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/supabase_config.dart';
@@ -47,7 +48,9 @@ class SupabaseAuthService {
     await _client.auth.signInWithOAuth(
       provider,
       redirectTo: SupabaseConfig.oauthRedirectUri,
-      authScreenLaunchMode: LaunchMode.externalApplication,
+      authScreenLaunchMode: kIsWeb
+          ? LaunchMode.platformDefault
+          : LaunchMode.externalApplication,
     );
   }
 

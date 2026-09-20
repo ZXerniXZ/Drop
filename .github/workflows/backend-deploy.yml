@@ -30,14 +30,16 @@ jobs:
             exit 1
           fi
 
-          mkdir -p "$BACKEND_DIR/storage" "$BACKEND_DIR/data"
+          mkdir -p "$BACKEND_DIR/storage" "$BACKEND_DIR/data" "$BACKEND_DIR/data/auth-pg"
 
           BACKEND_PORT=$(grep -E '^BACKEND_PORT=' "$BACKEND_DIR/.env" | cut -d= -f2- | tr -d '[:space:]' || true)
           BACKEND_PORT="${BACKEND_PORT:-8083}"
+          AUTH_PORT=$(grep -E '^AUTH_PORT=' "$BACKEND_DIR/.env" | cut -d= -f2- | tr -d '[:space:]' || true)
+          AUTH_PORT="${AUTH_PORT:-8090}"
 
           cd "$BACKEND_DIR"
           docker compose down
-          docker compose up -d --build --wait --wait-timeout 120
+          docker compose up -d --build --wait --wait-timeout 180
 
           docker compose ps
 
@@ -50,6 +52,20 @@ jobs:
             if [[ "${attempt}" -eq 30 ]]; then
               echo "ERROR: Backend did not become ready in time"
               docker compose logs --tail=50 backend
+              exit 1
+            fi
+            sleep 2
+          done
+
+          echo "Waiting for /auth/v1/health to respond..."
+          for attempt in $(seq 1 30); do
+            if curl -sf --max-time 5 "http://localhost:${AUTH_PORT}/auth/v1/health" >/dev/null; then
+              echo "Auth is ready (attempt ${attempt})"
+              break
+            fi
+            if [[ "${attempt}" -eq 30 ]]; then
+              echo "ERROR: Auth did not become ready in time"
+              docker compose logs --tail=50 auth caddy postgres-auth
               exit 1
             fi
             sleep 2

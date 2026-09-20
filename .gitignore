@@ -26,6 +26,7 @@ mobile_app/dart_defines.json
 
 # Backend runtime data
 backend/data/*.db
+backend/data/auth-pg/
 backend/storage/
 
 # OS

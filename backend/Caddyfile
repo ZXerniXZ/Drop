@@ -1,0 +1,20 @@
+# Gateway Auth: il client supabase_flutter chiama /auth/v1/* come su Cloud.
+# Caddy toglie il prefisso e inoltra a GoTrue (porta 9999).
+{
+	admin off
+}
+
+:8090 {
+	handle_path /auth/v1/* {
+		reverse_proxy auth:9999 {
+			header_up Host {host}
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-Host {host}
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	handle {
+		respond "Drop auth gateway" 404
+	}
+}

@@ -6,6 +6,7 @@ import 'screens/recorder_screen.dart';
 import 'services/supabase_auth_service.dart';
 import 'theme/drop_motion.dart';
 import 'theme/drop_theme.dart';
+import 'widgets/ios_install_banner.dart';
 
 class DropApp extends StatefulWidget {
   const DropApp({super.key});
@@ -34,6 +35,14 @@ class _DropAppState extends State<DropApp> {
       themeAnimationCurve: DropMotion.standard,
       theme: DropTheme.light(),
       darkTheme: DropTheme.dark(),
+      builder: (context, child) {
+        return Column(
+          children: [
+            const IosInstallBanner(),
+            Expanded(child: child ?? const SizedBox.shrink()),
+          ],
+        );
+      },
       home: StreamBuilder<AuthState>(
         stream: SupabaseAuthService.instance.authStateChanges,
         builder: (context, snapshot) {

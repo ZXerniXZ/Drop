@@ -1,9 +1,9 @@
-import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
-import 'package:path_provider/path_provider.dart';
 
 import 'api_url_resolver.dart';
+import 'audio_binary_store.dart';
 import 'audio_recording_config.dart';
 import 'supabase_auth_service.dart';
 
@@ -14,7 +14,7 @@ class NoteAudioService {
 
   static final NoteAudioService instance = NoteAudioService._();
 
-  /// Percorso locale dell'audio se e' presente sul telefono.
+  /// Percorso/handle locale dell'audio se e' presente sul dispositivo.
   ///
   /// Il nome del file deriva dall'id della nota, quindi un audio scaricato in
   /// precedenza si ritrova anche se la nota in database non ha un audio_path.
@@ -22,18 +22,19 @@ class NoteAudioService {
     String noteId, {
     String? currentPath,
   }) async {
+    final store = AudioBinaryStore.instance;
     if (currentPath != null &&
         currentPath.isNotEmpty &&
-        await File(currentPath).exists()) {
+        await store.exists(currentPath)) {
       return currentPath;
     }
 
-    final canonical = await _destinationFor(noteId);
-    if (await File(canonical).exists()) return canonical;
+    final canonical = await store.canonicalHandle(noteId);
+    if (await store.exists(canonical)) return canonical;
     return null;
   }
 
-  /// Restituisce il percorso locale dell'audio, scaricandolo se serve.
+  /// Restituisce l'handle locale dell'audio, scaricandolo se serve.
   /// Restituisce null se il server non ha piu' il file.
   Future<String?> ensureLocalAudio(
     String noteId, {
@@ -52,7 +53,6 @@ class NoteAudioService {
 
     final url = await ApiUrlResolver.resolveEndpoint('/notes/$noteId/audio');
     final client = http.Client();
-    File? partial;
     try {
       final request = http.Request('GET', Uri.parse(url))
         ..headers['Authorization'] = 'Bearer $token';
@@ -66,34 +66,31 @@ class NoteAudioService {
         throw Exception('Download audio fallito (${response.statusCode})');
       }
 
-      final destination = await _destinationFor(noteId);
-      // Scrittura in streaming: un audio lungo non deve stare tutto in memoria.
-      partial = File('$destination.part');
-      final sink = partial.openWrite();
-      await response.stream.pipe(sink);
-
-      if (await partial.length() == 0) {
-        await partial.delete();
-        return null;
+      final builder = BytesBuilder(copy: false);
+      await for (final chunk in response.stream) {
+        builder.add(chunk);
       }
+      final bytes = builder.takeBytes();
+      if (bytes.isEmpty) return null;
 
-      final file = await partial.rename(destination);
-      partial = null;
-      return file.path;
+      final mime = (response.headers['content-type'] ?? '')
+          .split(';')
+          .first
+          .trim();
+      final extension = AudioRecordingConfig.extensionFromMime(
+        mime.isEmpty ? null : mime,
+      );
+
+      return await AudioBinaryStore.instance.saveBytes(
+        noteId: noteId,
+        bytes: bytes,
+        extension: extension,
+        mimeType: mime.isEmpty
+            ? AudioRecordingConfig.mimeFromExtension(extension)
+            : mime,
+      );
     } finally {
-      if (partial != null && await partial.exists()) {
-        await partial.delete();
-      }
       client.close();
     }
-  }
-
-  Future<String> _destinationFor(String noteId) async {
-    final dir = await getApplicationDocumentsDirectory();
-    final recordingsDir = Directory('${dir.path}/recordings');
-    if (!await recordingsDir.exists()) {
-      await recordingsDir.create(recursive: true);
-    }
-    return AudioRecordingConfig.buildPersistedPath(recordingsDir.path, noteId);
   }
 }

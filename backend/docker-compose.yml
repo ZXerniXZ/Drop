@@ -8,6 +8,8 @@ services:
       - .env
     environment:
       DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/drop_backend.db}
+      SUPABASE_URL: ${SUPABASE_URL:-https://auth.drop-prj.xyz}
+      SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET:-${JWT_SECRET}}
     volumes:
       - ./storage:/app/storage
       - ./data:/app/data
@@ -17,3 +19,107 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  postgres-auth:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: gotrue
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${AUTH_POSTGRES_PASSWORD}
+    volumes:
+      - ./data/auth-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d gotrue"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  auth:
+    image: supabase/gotrue:v2.197.0
+    restart: always
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL:-https://auth.drop-prj.xyz/auth/v1}
+
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://postgres:${AUTH_POSTGRES_PASSWORD}@postgres-auth:5432/gotrue?sslmode=disable
+      GOTRUE_DB_NAMESPACE: auth
+
+      GOTRUE_SITE_URL: ${SITE_URL:-https://app.drop-prj.xyz}
+      GOTRUE_URI_ALLOW_LIST: ${GOTRUE_URI_ALLOW_LIST:-https://app.drop-prj.xyz,https://app.drop-prj.xyz/**,http://localhost:*,http://127.0.0.1:*,com.drop.plaudclone.drop://**}
+      GOTRUE_DISABLE_SIGNUP: "false"
+
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY:-3600}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_ISSUER: supabase
+
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL:-noreply@drop-prj.xyz}
+      GOTRUE_SMTP_HOST: ${SMTP_HOST:-localhost}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT:-25}
+      GOTRUE_SMTP_SENDER_NAME: Drop
+
+      GOTRUE_EXTERNAL_PHONE_ENABLED: "false"
+
+      GOTRUE_EXTERNAL_GOOGLE_ENABLED: ${GOTRUE_EXTERNAL_GOOGLE_ENABLED:-true}
+      GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: ${GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID:-}
+      GOTRUE_EXTERNAL_GOOGLE_SECRET: ${GOTRUE_EXTERNAL_GOOGLE_SECRET:-}
+      GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: ${API_EXTERNAL_URL:-https://auth.drop-prj.xyz/auth/v1}/callback
+
+      GOTRUE_EXTERNAL_GITHUB_ENABLED: ${GOTRUE_EXTERNAL_GITHUB_ENABLED:-true}
+      GOTRUE_EXTERNAL_GITHUB_CLIENT_ID: ${GOTRUE_EXTERNAL_GITHUB_CLIENT_ID:-}
+      GOTRUE_EXTERNAL_GITHUB_SECRET: ${GOTRUE_EXTERNAL_GITHUB_SECRET:-}
+      GOTRUE_EXTERNAL_GITHUB_REDIRECT_URI: ${API_EXTERNAL_URL:-https://auth.drop-prj.xyz/auth/v1}/callback
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-T",
+          "5",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:9999/health",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    depends_on:
+      auth:
+        condition: service_healthy
+    ports:
+      - "${AUTH_PORT:-8090}:8090"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-T",
+          "5",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:8090/auth/v1/health",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s

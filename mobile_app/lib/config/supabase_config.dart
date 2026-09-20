@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 class SupabaseConfig {
   SupabaseConfig._();
 
@@ -10,6 +12,14 @@ class SupabaseConfig {
     defaultValue: 'YOUR_SUPABASE_ANON_KEY',
   );
 
-  /// Redirect OAuth — registrare in Supabase Dashboard → Auth → URL Configuration
-  static const oauthRedirectUri = 'com.drop.plaudclone.drop://login-callback/';
+  static const mobileOauthRedirectUri =
+      'com.drop.plaudclone.drop://login-callback/';
+
+  static const webProductionOrigin = 'https://app.drop-prj.xyz';
+
+  /// Registrare in GOTRUE_URI_ALLOW_LIST (PWA, localhost, schema mobile).
+  static String get oauthRedirectUri {
+    if (kIsWeb) return Uri.base.origin;
+    return mobileOauthRedirectUri;
+  }
 }

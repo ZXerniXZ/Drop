@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
+
+import 'audio_binary_store.dart';
 
 import '../models/ai_preferences.dart';
 import '../models/audio_note.dart';
@@ -88,7 +89,8 @@ class OpenRouterClient {
       };
 
   String _audioFormat(String filePath) {
-    final suffix = p.extension(filePath).toLowerCase();
+    final name = AudioBinaryStore.instance.filenameOf(filePath);
+    final suffix = p.extension(name).toLowerCase();
     return _formatMap[suffix] ?? 'm4a';
   }
 
@@ -105,7 +107,7 @@ class OpenRouterClient {
     required String apiKey,
     String? language,
   }) async {
-    final bytes = await File(filePath).readAsBytes();
+    final bytes = await AudioBinaryStore.instance.readAll(filePath);
     final audioB64 = base64Encode(bytes);
 
     final payload = <String, dynamic>{

@@ -1,11 +1,12 @@
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
 import '../models/ai_preferences.dart';
 import 'api_url_resolver.dart';
+import 'audio_binary_store.dart';
 
 const int chunkedUploadChunkSize = 2 * 1024 * 1024;
 const int legacyUploadMaxBytes = 4 * 1024 * 1024;
@@ -30,13 +31,14 @@ class ChunkedUploadService {
     Future<void> Function(String uploadSessionId, int uploadedChunks)?
         onSessionProgress,
   }) async {
-    final file = File(filePath);
-    if (!await file.exists()) {
+    final store = AudioBinaryStore.instance;
+    if (!await store.exists(filePath)) {
       throw Exception('File audio non trovato');
     }
 
-    final totalSize = await file.length();
-    final totalChunks = (totalSize + chunkedUploadChunkSize - 1) ~/ chunkedUploadChunkSize;
+    final totalSize = await store.byteLength(filePath);
+    final totalChunks =
+        (totalSize + chunkedUploadChunkSize - 1) ~/ chunkedUploadChunkSize;
     if (totalChunks == 0) {
       throw Exception('File audio vuoto');
     }
@@ -62,7 +64,7 @@ class ChunkedUploadService {
     } else {
       uploadId = await _createSession(
         accessToken: accessToken,
-        filename: filePath.split(Platform.pathSeparator).last,
+        filename: store.filenameOf(filePath),
         totalSize: totalSize,
         totalChunks: totalChunks,
         prefs: prefs,
@@ -73,29 +75,26 @@ class ChunkedUploadService {
       startChunk = 0;
     }
 
-    final randomAccess = await file.open();
+    for (var index = startChunk; index < totalChunks; index++) {
+      final chunkLength = index < totalChunks - 1
+          ? chunkedUploadChunkSize
+          : totalSize - (chunkedUploadChunkSize * (totalChunks - 1));
 
-    try {
-      for (var index = startChunk; index < totalChunks; index++) {
-        final chunkLength = index < totalChunks - 1
-            ? chunkedUploadChunkSize
-            : totalSize - (chunkedUploadChunkSize * (totalChunks - 1));
+      final chunkBytes = await store.readRange(
+        filePath,
+        index * chunkedUploadChunkSize,
+        chunkLength,
+      );
 
-        await randomAccess.setPosition(index * chunkedUploadChunkSize);
-        final chunkBytes = await randomAccess.read(chunkLength);
+      await _uploadChunkWithRetry(
+        uploadId: uploadId,
+        index: index,
+        bytes: chunkBytes,
+        accessToken: accessToken,
+      );
 
-        await _uploadChunkWithRetry(
-          uploadId: uploadId,
-          index: index,
-          bytes: chunkBytes,
-          accessToken: accessToken,
-        );
-
-        onProgress?.call(index + 1, totalChunks);
-        await onSessionProgress?.call(uploadId, index);
-      }
-    } finally {
-      await randomAccess.close();
+      onProgress?.call(index + 1, totalChunks);
+      await onSessionProgress?.call(uploadId, index);
     }
 
     return _completeSession(uploadId, accessToken);
@@ -169,7 +168,7 @@ class ChunkedUploadService {
   Future<void> _uploadChunkWithRetry({
     required String uploadId,
     required int index,
-    required List<int> bytes,
+    required Uint8List bytes,
     required String accessToken,
   }) async {
     Object? lastError;
@@ -196,7 +195,7 @@ class ChunkedUploadService {
   Future<void> _uploadChunk({
     required String uploadId,
     required int index,
-    required List<int> bytes,
+    required Uint8List bytes,
     required String accessToken,
   }) async {
     final url = await ApiUrlResolver.resolveEndpoint(

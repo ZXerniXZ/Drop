@@ -386,7 +386,7 @@ class _AccountRow extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Account Supabase',
+                  'Account',
                   style: Theme.of(context).textTheme.labelSmall,
                 ),
               ],
@@ -811,7 +811,7 @@ class _StorageSection extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text(
-            '${storage.fileCount} file .m4a locali',
+            storage.detailLabel,
             style: Theme.of(context).textTheme.labelSmall,
           ),
           const SizedBox(height: 14),

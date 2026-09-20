@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC_DARK_UI = ROOT / "assets/branding/source/logo_light.png"
 SRC_LIGHT_UI = ROOT / "assets/branding/source/logo_dark.png"
 
+WEB_ICONS = ROOT / "web/icons"
+WEB_ROOT = ROOT / "web"
 OUT = ROOT / "assets/branding"
 ANDROID_RES = ROOT / "android/app/src/main/res"
 IOS_ICON_DIR = ROOT / "ios/Runner/AppIconAlt"
@@ -149,6 +151,22 @@ def main() -> None:
     }
     for name, sz in mapping.items():
         app_icon.resize((sz, sz), Image.Resampling.LANCZOS).save(APPICON / name)
+
+    WEB_ICONS.mkdir(parents=True, exist_ok=True)
+    for sz in (192, 512):
+        app_icon.resize((sz, sz), Image.Resampling.LANCZOS).save(
+            WEB_ICONS / f"Icon-{sz}.png"
+        )
+        maskable = Image.new("RGB", (sz, sz), (9, 9, 11))
+        inner = int(sz * 0.72)
+        scaled = app_icon.resize((inner, inner), Image.Resampling.LANCZOS)
+        offset = (sz - inner) // 2
+        maskable.paste(scaled, (offset, offset))
+        maskable.save(WEB_ICONS / f"Icon-maskable-{sz}.png")
+    app_icon.resize((180, 180), Image.Resampling.LANCZOS).save(
+        WEB_ICONS / "apple-touch-icon.png"
+    )
+    app_icon.resize((32, 32), Image.Resampling.LANCZOS).save(WEB_ROOT / "favicon.png")
 
     print("Branding assets regenerated.")
 

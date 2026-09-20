@@ -1,12 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:http/http.dart' as http;
-import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../services/api_url_resolver.dart';
 import '../models/ai_preferences.dart';
@@ -18,6 +17,7 @@ import '../models/transcript_segment.dart';
 import '../services/app_preferences_service.dart';
 import '../models/note_filters.dart';
 import '../services/chunked_upload_service.dart';
+import '../services/audio_binary_store.dart';
 import '../services/audio_recording_config.dart';
 import '../services/cloud_sync_service.dart';
 import '../services/local_database_service.dart';
@@ -52,7 +52,8 @@ class RecorderScreen extends StatefulWidget {
   State<RecorderScreen> createState() => _RecorderScreenState();
 }
 
-class _RecorderScreenState extends State<RecorderScreen> {
+class _RecorderScreenState extends State<RecorderScreen>
+    with WidgetsBindingObserver {
   final AudioRecorder _recorder = AudioRecorder();
   final TextEditingController _searchController = TextEditingController();
 
@@ -70,13 +71,16 @@ class _RecorderScreenState extends State<RecorderScreen> {
   Timer? _timer;
   StreamSubscription<Amplitude>? _amplitudeSub;
   String? _currentPath;
+  RecordConfig _recordConfig = AudioRecordingConfig.recordConfig;
+  bool _stopping = false;
 
   List<AudioNote> get _filteredNotes => applyNoteFilters(_notes, _filters);
 
   @override
   void initState() {
     super.initState();
-    FlutterForegroundTask.addTaskDataCallback(_onForegroundTaskData);
+    WidgetsBinding.instance.addObserver(this);
+    RecordingForegroundService.addTaskDataCallback(_onForegroundTaskData);
     _loadNotes();
     _loadTags();
     _loadOrbStyle();
@@ -103,12 +107,24 @@ class _RecorderScreenState extends State<RecorderScreen> {
 
   @override
   void dispose() {
-    FlutterForegroundTask.removeTaskDataCallback(_onForegroundTaskData);
+    WidgetsBinding.instance.removeObserver(this);
+    RecordingForegroundService.removeTaskDataCallback(_onForegroundTaskData);
     _timer?.cancel();
     _amplitudeSub?.cancel();
     _searchController.dispose();
     _recorder.dispose();
+    unawaited(WakelockPlus.disable());
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!kIsWeb) return;
+    if (!_isRecording && !_isPaused) return;
+    if (state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused) {
+      unawaited(_stopRecording(interrupted: true));
+    }
   }
 
   void _onForegroundTaskData(Object data) {
@@ -237,17 +253,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
 
   Future<String?> _persistAudioFile(String tempPath, String noteId) async {
     try {
-      final dir = await getApplicationDocumentsDirectory();
-      final recordingsDir = Directory('${dir.path}/recordings');
-      if (!await recordingsDir.exists()) {
-        await recordingsDir.create(recursive: true);
-      }
-      final dest = AudioRecordingConfig.buildPersistedPath(
-        recordingsDir.path,
-        noteId,
-      );
-      await File(tempPath).copy(dest);
-      return dest;
+      return await AudioBinaryStore.instance.persistForNote(tempPath, noteId);
     } catch (_) {
       return tempPath;
     }
@@ -371,7 +377,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
     required int durationSeconds,
   }) async {
     final accessToken = await _requireAccessToken();
-    final fileSize = await File(filePath).length();
+    final fileSize = await AudioBinaryStore.instance.byteLength(filePath);
     String jobId;
 
     await _reportAnalysisProgress(
@@ -383,7 +389,11 @@ class _RecorderScreenState extends State<RecorderScreen> {
       final url = await _resolveUploadUrl();
       final request = http.MultipartRequest('POST', Uri.parse(url));
       request.headers['Authorization'] = 'Bearer $accessToken';
-      request.files.add(await http.MultipartFile.fromPath('file', filePath));
+      final bytes = await AudioBinaryStore.instance.readAll(filePath);
+      final filename = AudioBinaryStore.instance.filenameOf(filePath);
+      request.files.add(
+        http.MultipartFile.fromBytes('file', bytes, filename: filename),
+      );
       request.fields['ai_model'] = prefs.model.openRouterId;
       request.fields['language'] = prefs.transcriptionLanguage.name;
       request.fields['available_tags'] = jsonEncode(tags);
@@ -535,7 +545,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
         note.id,
         currentPath: note.audioPath,
       );
-      if (path != null) await File(path).delete();
+      if (path != null) await AudioBinaryStore.instance.delete(path);
     } catch (_) {}
     if (!mounted) return;
     setState(() => _notes.removeWhere((n) => n.id == note.id));
@@ -582,10 +592,22 @@ class _RecorderScreenState extends State<RecorderScreen> {
       return;
     }
 
-    final dir = await getTemporaryDirectory();
-    final path = AudioRecordingConfig.buildTempPath(dir.path);
+    _recordConfig = await AudioRecordingConfig.resolve(_recorder);
+    final path = await AudioBinaryStore.instance.createRecordingDestination(
+      extension: AudioRecordingConfig.extensionFor(_recordConfig),
+    );
 
-    await _recorder.start(AudioRecordingConfig.recordConfig, path: path);
+    try {
+      await _recorder.start(_recordConfig, path: path);
+      await WakelockPlus.enable();
+    } catch (e) {
+      await WakelockPlus.disable();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Impossibile avviare la registrazione: $e')),
+      );
+      return;
+    }
 
     await RecordingForegroundService.start(
       elapsedLabel: _formatDuration(Duration.zero),
@@ -614,59 +636,84 @@ class _RecorderScreenState extends State<RecorderScreen> {
     });
   }
 
-  Future<void> _stopRecording() async {
+  Future<void> _stopRecording({bool interrupted = false}) async {
+    if (_stopping) return;
+    if (!_isRecording && !_isPaused) return;
+    _stopping = true;
+
     _timer?.cancel();
     _timer = null;
     await _amplitudeSub?.cancel();
     _amplitudeSub = null;
 
-    if (_isPaused) {
-      await _recorder.resume();
+    try {
+      if (_isPaused) {
+        await _recorder.resume();
+      }
+
+      final recordedDuration = _elapsed;
+      final path = await _recorder.stop();
+      await RecordingForegroundService.stop();
+      await WakelockPlus.disable();
+
+      if (!mounted) return;
+      setState(() {
+        _isRecording = false;
+        _isPaused = false;
+        _elapsed = Duration.zero;
+        _amplitudeLevel = 0;
+      });
+
+      final recorderPath = path ?? _currentPath;
+      _currentPath = null;
+      if (recorderPath == null || !mounted) return;
+
+      final savedPath = await AudioBinaryStore.instance.adoptRecorderOutput(
+        recorderPath,
+        suggestedExtension: AudioRecordingConfig.extensionFor(_recordConfig),
+      );
+
+      final createdAt = DateTime.now();
+      final noteId = createdAt.millisecondsSinceEpoch.toString();
+      final placeholder = AudioNote(
+        id: noteId,
+        title: AudioNote.titleFromDateTime(createdAt),
+        dateTime: createdAt,
+        audioPath: savedPath,
+        transcription: '',
+        summary: '',
+        durationSeconds: recordedDuration.inSeconds,
+        isNew: true,
+        tag: 'Memo',
+        analysisStatus: NoteAnalysisStatus.processing,
+      );
+
+      await LocalDatabaseService.instance.saveNote(placeholder);
+      if (!mounted) return;
+
+      setState(() {
+        _notes.insert(0, placeholder);
+        _activeTab = DropNavTab.file;
+      });
+
+      if (interrupted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Registrazione interrotta: Drop deve restare aperto e a schermo acceso.',
+            ),
+          ),
+        );
+      }
+
+      unawaited(_processUpload(
+        noteId: noteId,
+        filePath: savedPath,
+        durationSeconds: recordedDuration.inSeconds,
+      ));
+    } finally {
+      _stopping = false;
     }
-
-    final recordedDuration = _elapsed;
-    final path = await _recorder.stop();
-    await RecordingForegroundService.stop();
-
-    setState(() {
-      _isRecording = false;
-      _isPaused = false;
-      _elapsed = Duration.zero;
-      _amplitudeLevel = 0;
-    });
-
-    final savedPath = path ?? _currentPath;
-    _currentPath = null;
-    if (savedPath == null || !mounted) return;
-
-    final createdAt = DateTime.now();
-    final noteId = createdAt.millisecondsSinceEpoch.toString();
-    final placeholder = AudioNote(
-      id: noteId,
-      title: AudioNote.titleFromDateTime(createdAt),
-      dateTime: createdAt,
-      audioPath: savedPath,
-      transcription: '',
-      summary: '',
-      durationSeconds: recordedDuration.inSeconds,
-      isNew: true,
-      tag: 'Memo',
-      analysisStatus: NoteAnalysisStatus.processing,
-    );
-
-    await LocalDatabaseService.instance.saveNote(placeholder);
-    if (!mounted) return;
-
-    setState(() {
-      _notes.insert(0, placeholder);
-      _activeTab = DropNavTab.file;
-    });
-
-    unawaited(_processUpload(
-      noteId: noteId,
-      filePath: savedPath,
-      durationSeconds: recordedDuration.inSeconds,
-    ));
   }
 
   Future<void> _cancelRecording() async {
@@ -692,35 +739,44 @@ class _RecorderScreenState extends State<RecorderScreen> {
     );
 
     if (confirmed != true || !mounted) return;
+    if (_stopping) return;
+    _stopping = true;
 
     _timer?.cancel();
     _timer = null;
     await _amplitudeSub?.cancel();
     _amplitudeSub = null;
 
-    if (_isPaused) {
-      await _recorder.resume();
-    }
+    try {
+      if (_isPaused) {
+        await _recorder.resume();
+      }
 
-    final path = await _recorder.stop();
-    await RecordingForegroundService.stop();
+      final path = await _recorder.stop();
+      await RecordingForegroundService.stop();
+      await WakelockPlus.disable();
 
-    final toDelete = path ?? _currentPath;
-    if (toDelete != null) {
-      try {
-        final file = File(toDelete);
-        if (await file.exists()) await file.delete();
-      } catch (_) {}
-    }
+      final toDelete = path ?? _currentPath;
+      if (toDelete != null) {
+        try {
+          final handle = toDelete.startsWith('blob:') || toDelete.startsWith('mem:')
+              ? await AudioBinaryStore.instance.adoptRecorderOutput(toDelete)
+              : toDelete;
+          await AudioBinaryStore.instance.delete(handle);
+        } catch (_) {}
+      }
 
-    if (!mounted) return;
-    setState(() {
-      _isRecording = false;
-      _isPaused = false;
-      _elapsed = Duration.zero;
-      _amplitudeLevel = 0;
       _currentPath = null;
-    });
+      if (!mounted) return;
+      setState(() {
+        _isRecording = false;
+        _isPaused = false;
+        _elapsed = Duration.zero;
+        _amplitudeLevel = 0;
+      });
+    } finally {
+      _stopping = false;
+    }
   }
 
   Future<void> _retryAnalysis(AudioNote note) async {
@@ -735,7 +791,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
       return;
     }
 
-    if (!await File(path).exists()) {
+    if (!await AudioBinaryStore.instance.exists(path)) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('File audio non trovato sul dispositivo')),
@@ -876,6 +932,18 @@ class _RecorderScreenState extends State<RecorderScreen> {
                 ),
               ),
             ),
+            if (kIsWeb && (_isRecording || _isPaused))
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+                child: Text(
+                  'Su questo dispositivo la registrazione continua solo con Drop aperto e lo schermo acceso.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: DropColors.muted(context),
+                        height: 1.35,
+                      ),
+                ),
+              ),
             DropBottomNav(
               activeTab: _activeTab,
               onTabChanged: (tab) {
@@ -887,7 +955,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
               },
               onStartRecording: _startRecording,
               onPauseResume: _togglePauseResume,
-              onFinishRecording: _stopRecording,
+              onFinishRecording: () => _stopRecording(),
               onCancelRecording: _cancelRecording,
               isRecording: _isRecording,
               isPaused: _isPaused,

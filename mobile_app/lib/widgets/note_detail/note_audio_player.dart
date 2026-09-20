@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../../models/transcript_segment.dart';
+import '../../services/audio_binary_store.dart';
 import '../../services/note_audio_service.dart';
 import '../../theme/drop_theme.dart';
 import 'karaoke_transcript.dart';
@@ -69,7 +70,15 @@ class _NoteAudioPlayerState extends State<NoteAudioPlayer> {
       await _positionSub?.cancel();
       await _stateSub?.cancel();
 
-      await _player.setFilePath(_audioPath);
+      final playback = await AudioBinaryStore.instance.playbackUri(_audioPath);
+      if (playback == null) {
+        throw Exception('Audio non disponibile');
+      }
+      if (AudioBinaryStore.instance.playbackUsesUrl) {
+        await _player.setUrl(playback);
+      } else {
+        await _player.setFilePath(playback);
+      }
       final duration = _player.duration;
       _positionSub = _player.positionStream.listen((position) {
         if (!mounted) return;

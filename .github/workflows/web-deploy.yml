@@ -1,0 +1,43 @@
+name: Deploy Web PWA
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'mobile_app/**'
+      - '.github/workflows/web-deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Build Flutter web
+        working-directory: mobile_app
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [[ -z "$SUPABASE_URL" || -z "$SUPABASE_ANON_KEY" ]]; then
+            echo "ERROR: Configure SUPABASE_URL and SUPABASE_ANON_KEY repository secrets."
+            exit 1
+          fi
+          flutter pub get
+          dart run sqflite_common_ffi_web:setup --force
+          flutter build web --release --no-wasm-dry-run \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy mobile_app/build/web --project-name=drop-app --commit-dirty=true

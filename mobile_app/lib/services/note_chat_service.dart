@@ -9,6 +9,7 @@ import '../models/chat_stream_event.dart';
 import '../models/note_chat_message.dart';
 import 'api_url_resolver.dart';
 import 'app_preferences_service.dart';
+import 'http_client.dart';
 import 'local_database_service.dart';
 import 'openrouter_client.dart';
 import 'supabase_auth_service.dart';
@@ -168,7 +169,7 @@ class NoteChatService {
       'note_context': _noteContextFromAudioNote(note),
     });
 
-    final client = http.Client();
+    final client = createHttpClient();
     try {
       final request = http.Request('POST', Uri.parse(url))
         ..headers['Content-Type'] = 'application/json'

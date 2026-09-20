@@ -18,6 +18,7 @@ class AppPreferencesService {
   static const _tagsKey = 'note_tags';
   static const _openRouterApiKey = 'openrouter_api_key';
   static const _recordOrbStyleKey = 'dev_record_orb_style';
+  static const _iosInstallBannerDismissedKey = 'ios_install_banner_dismissed';
 
   static const _secureStorage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
@@ -123,5 +124,15 @@ class AppPreferencesService {
   Future<void> saveRecordOrbStyle(RecordOrbStyle style) async {
     await init();
     await _store.setString(_recordOrbStyleKey, style.id);
+  }
+
+  Future<bool> loadIosInstallBannerDismissed() async {
+    await init();
+    return _store.getBool(_iosInstallBannerDismissedKey) ?? false;
+  }
+
+  Future<void> setIosInstallBannerDismissed() async {
+    await init();
+    await _store.setBool(_iosInstallBannerDismissedKey, true);
   }
 }

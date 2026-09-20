@@ -22,24 +22,23 @@ Il progetto è pensato per un uso domestico: il server gira su una **Raspberry P
 
 ```
 ┌─────────────────┐         HTTPS          ┌──────────────────────────┐
-│  Mobile App     │  ──────────────────►   │  Cloudflare Tunnel       │
-│  (Flutter)      │                        │  (Raspberry Pi / locale) │
+│  App / PWA      │  ──────────────────►   │  Cloudflare Tunnel       │
+│  (Flutter)      │                        │  (Raspberry Pi)          │
 │                 │                        └────────────┬─────────────┘
-│  • Registra     │                                     │
-│    audio .m4a   │                                     ▼
-│  • Upload       │                        ┌──────────────────────────┐
-│    background   │                        │  Backend (FastAPI)       │
-└─────────────────┘                        │  • Riceve audio          │
-                                           │  • SQLite (metadati)     │
-                                           │  • OpenRouter API        │
-                                           └────────────┬─────────────┘
-                                                        │
-                                                        ▼
-                                           ┌──────────────────────────┐
-                                           │  OpenRouter              │
-                                           │  • Whisper (trascrizione)│
-                                           │  • LLM (riassunti)       │
-                                           └──────────────────────────┘
+│  • Login        │                                     │
+│  • Audio .m4a   │              ┌──────────────────────┼──────────────────┐
+│  • Upload       │              ▼                      ▼                  │
+└─────────────────┘   auth.drop-prj.xyz        api.drop-prj.xyz            │
+                      ┌─────────────────┐    ┌──────────────────────────┐  │
+                      │ Caddy :8090     │    │ FastAPI                  │  │
+                      │ /auth/v1 →      │    │ JWT HS256 = JWT_SECRET   │  │
+                      │ GoTrue          │    │ SQLite note/job          │  │
+                      │ Postgres auth   │    │ OpenRouter               │  │
+                      └─────────────────┘    └──────────────────────────┘  │
+                                                                           │
+                                           ┌───────────────────────────────┘
+                                           ▼
+                                      OpenRouter (Whisper + LLM)
 ```
 
 ### Flusso dati
@@ -60,6 +59,7 @@ Il progetto è pensato per un uso domestico: il server gira su una **Raspberry P
 | **Mobile** | Flutter (Dart) | Registrazione audio background, upload HTTP |
 | **Backend** | Python 3.12+, FastAPI | API REST, gestione file e job asincroni |
 | **Database** | SQLite | Metadati registrazioni, trascrizioni, riassunti |
+| **Auth** | GoTrue + Postgres | Login email, Google, GitHub sulla Pi (`auth.drop-prj.xyz`) |
 | **Container** | Docker + Docker Compose | Deploy riproducibile su PC e Raspberry Pi |
 | **AI** | OpenRouter | Whisper per STT, LLM per summarization |
 | **Rete** | Cloudflare Tunnel | Esposizione sicura senza port forwarding |
@@ -72,9 +72,10 @@ Il progetto è pensato per un uso domestico: il server gira su una **Raspberry P
 ```
 Drop/
 ├── README.md           # Questo file
-├── backend/            # API FastAPI, Docker, SQLite
-│   └── data/           # Database SQLite (gitignored)
-└── mobile_app/         # Applicazione Flutter
+├── backend/            # API FastAPI, GoTrue, Caddy, Docker
+│   ├── Caddyfile       # Prefisso /auth/v1 verso GoTrue
+│   └── data/           # SQLite e Postgres auth (gitignored)
+└── mobile_app/         # Applicazione Flutter (APK + PWA)
 ```
 
 ---
@@ -221,6 +222,46 @@ Tutte le release: https://github.com/ZXerniXZ/Drop/releases
 
 ---
 
+## PWA per iPhone (Safari)
+
+La stessa app Flutter è pubblicata come sito installabile su **https://app.drop-prj.xyz**.
+
+iOS non permette la registrazione in background: Drop deve restare aperto e a schermo acceso. L'APK Android continua a usare il foreground service.
+
+### Installazione su iPhone
+
+1. Apri https://app.drop-prj.xyz in **Safari** (non Chrome)
+2. Tocca **Condividi**
+3. Tocca **Aggiungi a Home**
+4. Consenti il microfono alla prima registrazione
+
+### Deploy Cloudflare Pages
+
+Ogni push su `main` che tocca `mobile_app/` esegue `.github/workflows/web-deploy.yml`.
+
+Secret GitHub da configurare:
+
+| Secret | Uso |
+|--------|-----|
+| `SUPABASE_URL` | già usato per l'APK |
+| `SUPABASE_ANON_KEY` | già usato per l'APK |
+| `CLOUDFLARE_API_TOKEN` | token con permesso Pages |
+| `CLOUDFLARE_ACCOUNT_ID` | account Cloudflare di `drop-prj.xyz` |
+
+Poi nel dashboard Cloudflare Pages, progetto `drop-app`: custom domain **app.drop-prj.xyz**.
+
+### Auth OAuth (self-host)
+
+Login email, Google e GitHub passano da **GoTrue** sulla Raspberry, non da supabase.com. L'app Flutter non cambia: usa `SUPABASE_URL` + `SUPABASE_ANON_KEY` puntati a `https://auth.drop-prj.xyz`.
+
+Redirect URI da registrare su Google Cloud Console e GitHub OAuth App:
+
+`https://auth.drop-prj.xyz/auth/v1/callback`
+
+Dettagli: sezione [Auth self-host sulla Raspberry](#auth-self-host-sulla-raspberry) più sotto.
+
+---
+
 ## Resilienza sulla Raspberry Pi
 
 Drop è progettato per ripartire automaticamente dopo **blackout** o **caduta Wi‑Fi**.
@@ -254,7 +295,9 @@ Lo script:
 systemctl status drop-backend.service cloudflared drop-healthcheck.timer
 docker compose -f ~/Drop/backend/docker-compose.yml ps
 curl -I http://localhost:8083/docs
+curl -I http://localhost:8090/auth/v1/health
 curl -I https://api.drop-prj.xyz/docs
+curl -I https://auth.drop-prj.xyz/auth/v1/health
 ```
 
 ### Test reboot
@@ -263,7 +306,95 @@ curl -I https://api.drop-prj.xyz/docs
 sudo reboot
 # dopo ~2 minuti, da un altro dispositivo:
 curl -I https://api.drop-prj.xyz/docs
+curl -I https://auth.drop-prj.xyz/auth/v1/health
 ```
+
+---
+
+## Auth self-host sulla Raspberry
+
+Drop non usa lo stack Supabase completo (Studio, Kong, Realtime, Storage). Sulla Pi restano tre container piccoli: **Postgres** (solo utenti), **GoTrue** (Auth), **Caddy** (prefisso `/auth/v1` che `supabase_flutter` si aspetta). Note e audio restano su FastAPI/SQLite.
+
+### 1. Chiavi JWT (una tantum)
+
+Sulla Raspberry, in `~/Drop/backend`:
+
+```bash
+cd ~/Drop/backend
+cp .env.example .env   # se manca
+python3 scripts/gen-jwt-keys.py
+```
+
+Copia `AUTH_POSTGRES_PASSWORD`, `JWT_SECRET`, `SUPABASE_JWT_SECRET` (uguale a `JWT_SECRET`), `ANON_KEY` e `SERVICE_ROLE_KEY` in `.env`. Non committare il file.
+
+Poi:
+
+```bash
+docker compose up -d --build
+curl -sf http://localhost:8090/auth/v1/health
+```
+
+### 2. Tunnel Cloudflare `auth.drop-prj.xyz`
+
+Stesso `cloudflared` già usato per `api.drop-prj.xyz`. Nel dashboard Zero Trust → Tunnels, aggiungi un hostname pubblico:
+
+| Hostname | Service |
+|----------|---------|
+| `auth.drop-prj.xyz` | `http://localhost:8090` |
+
+Nella zona DNS `drop-prj.xyz` deve comparire il CNAME `auth` verso il tunnel Cloudflare (stesso pattern di `api`).
+
+### 3. Google e GitHub OAuth
+
+I Client ID/secret stanno nella console del provider, non sul progetto Supabase Cloud.
+
+**Google Cloud Console** → APIs & Services → Credentials → OAuth 2.0 Client:
+
+- Authorized JavaScript origins: `https://auth.drop-prj.xyz`, `https://app.drop-prj.xyz`
+- Authorized redirect URI: `https://auth.drop-prj.xyz/auth/v1/callback`
+
+**GitHub** → Developer settings → OAuth Apps:
+
+- Homepage URL: `https://app.drop-prj.xyz`
+- Authorization callback URL: `https://auth.drop-prj.xyz/auth/v1/callback`
+
+In `~/Drop/backend/.env` sulla Pi:
+
+```
+GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID=...
+GOTRUE_EXTERNAL_GOOGLE_SECRET=...
+GOTRUE_EXTERNAL_GITHUB_CLIENT_ID=...
+GOTRUE_EXTERNAL_GITHUB_SECRET=...
+```
+
+Poi `docker compose up -d`. Senza questo passo Google/GitHub non chiudono il login. Email/password funziona comunque (`GOTRUE_MAILER_AUTOCONFIRM=true`, niente SMTP).
+
+### 4. Secret GitHub e rebuild app
+
+In GitHub → Settings → Secrets and variables → Actions aggiorna:
+
+| Secret | Valore |
+|--------|--------|
+| `SUPABASE_URL` | `https://auth.drop-prj.xyz` |
+| `SUPABASE_ANON_KEY` | `ANON_KEY` generato al punto 1 |
+
+Poi rebuild APK e PWA (push su `main` o workflow). L'UI di login non cambia.
+
+Redirect ammessi da GoTrue (`GOTRUE_URI_ALLOW_LIST`): PWA `https://app.drop-prj.xyz/**`, localhost, schema mobile `com.drop.plaudclone.drop://**`.
+
+### 5. Account già esistenti (remap `user_id`)
+
+Il `user_id` delle note è lo UUID `sub` del JWT. Al primo login sul GoTrue nuovo l'UUID cambia: le note in SQLite restano agganciate al vecchio id.
+
+Dopo il primo login self-host, sulla Pi (un solo utente = una riga):
+
+```bash
+cd ~/Drop/backend
+# vecchio UUID Cloud, nuovo UUID da GoTrue (sub del JWT dopo login)
+./scripts/remap-note-user.sh '<vecchio-uuid>' '<nuovo-uuid>'
+```
+
+Lo script aggiorna `notes`, `upload_jobs` e `upload_sessions`. Non importa gli utenti da supabase.com.
 
 ---
 

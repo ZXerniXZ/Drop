@@ -18,5 +18,15 @@ MAX_TRANSCRIPT_CHARS = int(os.getenv("MAX_TRANSCRIPT_CHARS", "100000"))
 SEGMENT_TARGET_SECONDS = float(os.getenv("SEGMENT_TARGET_SECONDS", "300"))
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./drop_backend.db")
-SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+# Stesso HS256 secret di GoTrue (JWT_SECRET). URL pubblico Auth senza /auth/v1.
+SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "") or os.getenv(
+    "JWT_SECRET", ""
+)
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://auth.drop-prj.xyz").rstrip("/")
+CORS_ORIGIN_REGEX = os.getenv(
+    "CORS_ORIGIN_REGEX",
+    r"https://app\.drop-prj\.xyz|"
+    r"https://[a-z0-9.-]+\.pages\.dev|"
+    r"http://localhost:\d+|"
+    r"http://127\.0\.0\.1:\d+",
+)
