@@ -32,33 +32,24 @@ class _DropBootAppState extends State<DropBootApp> {
   }
 
   Future<void> _start() async {
-    final boot = bootstrapDrop();
+    final slowTimer = Timer(const Duration(seconds: 8), () {
+      if (mounted && _error == null) setState(() => _slow = true);
+    });
     try {
-      await boot.timeout(const Duration(seconds: 8));
-    } on TimeoutException {
-      if (mounted) setState(() => _slow = true);
-      try {
-        await boot.timeout(const Duration(seconds: 20));
-      } on TimeoutException {
-        if (!mounted) return;
-        setState(() {
-          _error = 'Avvio troppo lento. Riprova.';
-        });
-        return;
-      } catch (error, stack) {
-        debugPrint('Drop boot: $error\n$stack');
-        if (!mounted) return;
-        setState(() => _error = 'Drop non si è avviato.');
-        return;
-      }
+      await bootstrapDrop();
+      slowTimer.cancel();
+      if (!mounted) return;
+      runApp(const DropApp());
     } catch (error, stack) {
+      slowTimer.cancel();
       debugPrint('Drop boot: $error\n$stack');
       if (!mounted) return;
-      setState(() => _error = 'Drop non si è avviato.');
-      return;
+      setState(() {
+        _error = error is TimeoutException
+            ? 'Avvio troppo lento. Riprova.'
+            : 'Drop non si è avviato.';
+      });
     }
-    if (!mounted) return;
-    runApp(const DropApp());
   }
 
   void _retry() {
