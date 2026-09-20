@@ -49,7 +49,8 @@ services:
       API_EXTERNAL_URL: ${API_EXTERNAL_URL:-https://auth.drop-prj.xyz/auth/v1}
 
       GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DB_DATABASE_URL: postgres://postgres:${AUTH_POSTGRES_PASSWORD}@postgres-auth:5432/gotrue?sslmode=disable
+      # search_path is what runtime queries use; GOTRUE_DB_NAMESPACE only covers migrations.
+      GOTRUE_DB_DATABASE_URL: postgres://postgres:${AUTH_POSTGRES_PASSWORD}@postgres-auth:5432/gotrue?sslmode=disable&search_path=auth
       GOTRUE_DB_NAMESPACE: auth
 
       GOTRUE_SITE_URL: ${SITE_URL:-https://app.drop-prj.xyz}
