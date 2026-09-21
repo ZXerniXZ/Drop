@@ -25,6 +25,7 @@ import '../services/note_audio_service.dart';
 import '../services/note_reanalysis_service.dart';
 import '../services/openrouter_client.dart';
 import '../services/recording_foreground_service.dart';
+import '../services/server_quota_service.dart';
 import '../services/supabase_auth_service.dart';
 import '../theme/drop_motion.dart';
 import '../theme/drop_theme.dart';
@@ -401,6 +402,9 @@ class _RecorderScreenState extends State<RecorderScreen>
       if (prefs.customPrompt.trim().isNotEmpty) {
         request.fields['custom_prompt'] = prefs.customPrompt.trim();
       }
+      if (durationSeconds > 0) {
+        request.fields['duration_seconds'] = '$durationSeconds';
+      }
 
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
@@ -413,6 +417,8 @@ class _RecorderScreenState extends State<RecorderScreen>
         }
         jobId = id;
       } else {
+        final quotaError = ServerQuotaService.parseError(response);
+        if (quotaError != null) throw quotaError;
         var errorDetail = response.body;
         try {
           final errJson = jsonDecode(response.body) as Map<String, dynamic>;
@@ -430,6 +436,7 @@ class _RecorderScreenState extends State<RecorderScreen>
         prefs: prefs,
         availableTags: tags,
         noteId: placeholder.id,
+        durationSeconds: durationSeconds,
         existingUploadSessionId: placeholder.uploadSessionId,
         lastUploadedChunkIndex: placeholder.uploadedChunks > 0
             ? placeholder.uploadedChunks - 1
@@ -492,6 +499,16 @@ class _RecorderScreenState extends State<RecorderScreen>
           availableTags: tagsConfig.tags,
         );
       } else {
+        final quota = await ServerQuotaService.instance.fetch();
+        if (quota != null &&
+            (quota.isExhausted || quota.wouldExceed(durationSeconds))) {
+          throw ServerQuotaExceeded(
+            message: ServerQuotaService.defaultMessage,
+            usedSeconds: quota.usedSeconds,
+            limitSeconds: quota.limitSeconds,
+            remainingSeconds: quota.remainingSeconds,
+          );
+        }
         result = await _uploadViaBackend(
           filePath: filePath,
           placeholder: placeholder,
@@ -523,6 +540,19 @@ class _RecorderScreenState extends State<RecorderScreen>
           backgroundColor: Colors.green,
         ),
       );
+    } on ServerQuotaExceeded catch (e) {
+      if (!mounted) return;
+      final index = _notes.indexWhere((n) => n.id == noteId);
+      if (index != -1) {
+        final failed = _notes[index].copyWith(
+          analysisStatus: NoteAnalysisStatus.failed,
+          transcription: e.message,
+        );
+        await LocalDatabaseService.instance.saveNote(failed);
+        if (!mounted) return;
+        _updateNoteInList(failed);
+      }
+      await _showServerQuotaDialog(e);
     } catch (e) {
       if (!mounted) return;
       final index = _notes.indexWhere((n) => n.id == noteId);
@@ -534,6 +564,30 @@ class _RecorderScreenState extends State<RecorderScreen>
       await LocalDatabaseService.instance.saveNote(failed);
       if (!mounted) return;
       _updateNoteInList(failed);
+    }
+  }
+
+  Future<void> _showServerQuotaDialog(ServerQuotaExceeded error) async {
+    if (!mounted) return;
+    final openAccount = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Piano incluso esaurito'),
+        content: Text(error.message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Chiudi'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Apri Account'),
+          ),
+        ],
+      ),
+    );
+    if (openAccount == true && mounted) {
+      setState(() => _activeTab = DropNavTab.settings);
     }
   }
 
@@ -872,6 +926,15 @@ class _RecorderScreenState extends State<RecorderScreen>
           backgroundColor: Colors.green,
         ),
       );
+    } on ServerQuotaExceeded catch (e) {
+      final restored = note.copyWith(
+        analysisStatus: NoteAnalysisStatus.ready,
+        clearAnalysisProgress: true,
+      );
+      await LocalDatabaseService.instance.saveNote(restored);
+      if (!mounted) return;
+      _updateNoteInList(restored);
+      await _showServerQuotaDialog(e);
     } catch (e) {
       final restored = note.copyWith(
         analysisStatus: NoteAnalysisStatus.ready,

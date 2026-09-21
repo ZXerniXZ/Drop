@@ -16,6 +16,8 @@ MAX_TRANSCRIPT_CHARS = int(os.getenv("MAX_TRANSCRIPT_CHARS", "100000"))
 # Durata degli spezzoni inviati a Whisper: piu' corti danno un avanzamento
 # misurabile all'app, piu' lunghi riducono il numero di richieste.
 SEGMENT_TARGET_SECONDS = float(os.getenv("SEGMENT_TARGET_SECONDS", "300"))
+# Ore di audio che un utente puo' far trascrivere con la chiave OpenRouter del server.
+SERVER_AUDIO_QUOTA_SECONDS = float(os.getenv("SERVER_AUDIO_QUOTA_SECONDS", "7200"))
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./drop_backend.db")
 # Stesso HS256 secret di GoTrue (JWT_SECRET). URL pubblico Auth senza /auth/v1.

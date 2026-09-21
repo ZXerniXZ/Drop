@@ -42,7 +42,7 @@ async def transcribe_audio_long_verbose(
     if not path.exists():
         raise FileNotFoundError(f"Audio file not found: {file_path}")
 
-    total_duration = _probe_duration_seconds(path)
+    total_duration = probe_duration_seconds(path)
     needs_split = path.stat().st_size > WHISPER_MAX_BYTES or (
         total_duration is not None and total_duration > SEGMENT_TARGET_SECONDS
     )
@@ -82,7 +82,7 @@ async def transcribe_audio_long_verbose(
                 )
             )
 
-            measured = _probe_duration_seconds(segment_path)
+            measured = probe_duration_seconds(segment_path)
             offset += measured if measured else (verbose.get("duration") or 0.0)
 
         return {
@@ -164,7 +164,7 @@ def _split_audio_file(
     path: Path, total_duration: float | None = None
 ) -> list[Path]:
     file_size = path.stat().st_size
-    duration = total_duration if total_duration is not None else _probe_duration_seconds(path)
+    duration = total_duration if total_duration is not None else probe_duration_seconds(path)
 
     chunk_duration = float(SEGMENT_TARGET_SECONDS)
     if duration and duration > 0:
@@ -212,7 +212,7 @@ def _split_audio_file(
     return segments
 
 
-def _probe_duration_seconds(path: Path) -> float | None:
+def probe_duration_seconds(path: Path) -> float | None:
     cmd = [
         "ffprobe",
         "-v",

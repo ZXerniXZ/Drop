@@ -8,6 +8,7 @@ import '../services/audio_storage_service.dart';
 import '../services/local_database_service.dart';
 import '../services/openrouter_client.dart';
 import '../services/server_health_service.dart';
+import '../services/server_quota_service.dart';
 import '../services/supabase_auth_service.dart';
 import '../services/usage_stats_service.dart';
 import '../theme/drop_motion.dart';
@@ -25,6 +26,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
   AiPreferences _aiPrefs = const AiPreferences();
   NoteTagsConfig _noteTags = const NoteTagsConfig();
   UsageStats? _usage;
+  ServerQuota? _serverQuota;
   AudioStorageInfo? _storage;
   ServerStatus _serverStatus = ServerStatus.checking;
   bool _isLoading = true;
@@ -61,12 +63,14 @@ class _MyDataScreenState extends State<MyDataScreen> {
     final hasCustomKey = await AppPreferencesService.instance.hasCustomOpenRouterKey;
     final storage = await AudioStorageService.getStorageInfo();
     final server = await ServerHealthService.checkHealth();
+    final quota = await ServerQuotaService.instance.fetch();
 
     if (!mounted) return;
     _promptController.text = prefs.customPrompt;
     _apiKeyController.text = apiKey ?? '';
     setState(() {
       _usage = UsageStatsService.compute(notes);
+      _serverQuota = quota;
       _aiPrefs = prefs;
       _noteTags = tags;
       _storage = storage;
@@ -252,6 +256,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
               _OpenRouterSection(
                 apiKeyController: _apiKeyController,
                 hasCustomKey: _hasCustomApiKey,
+                quota: _serverQuota,
                 obscureApiKey: _obscureApiKey,
                 isTesting: _isTestingApiKey,
                 onToggleObscure: () =>
@@ -568,6 +573,7 @@ class _OpenRouterSection extends StatelessWidget {
   const _OpenRouterSection({
     required this.apiKeyController,
     required this.hasCustomKey,
+    this.quota,
     required this.obscureApiKey,
     required this.isTesting,
     required this.onToggleObscure,
@@ -578,6 +584,7 @@ class _OpenRouterSection extends StatelessWidget {
 
   final TextEditingController apiKeyController;
   final bool hasCustomKey;
+  final ServerQuota? quota;
   final bool obscureApiKey;
   final bool isTesting;
   final VoidCallback onToggleObscure;
@@ -608,12 +615,29 @@ class _OpenRouterSection extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Lascia vuoto per usare il server Drop.',
+            hasCustomKey
+                ? 'Le trascrizioni usano la tua chiave, senza passare dal server Drop.'
+                : 'Lascia vuoto per usare il server Drop: 2 ore di audio incluse.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: DropColors.muted(context),
                   fontSize: 11,
                 ),
           ),
+          if (!hasCustomKey && quota != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              quota!.isExhausted
+                  ? 'Piano incluso esaurito. Inserisci una chiave per continuare.'
+                  : 'Ti restano ${quota!.remainingLabel} sul server Drop.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: quota!.isExhausted
+                        ? DropColors.recordRed
+                        : DropColors.muted(context),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          ],
           const SizedBox(height: 10),
           TextField(
             controller: apiKeyController,

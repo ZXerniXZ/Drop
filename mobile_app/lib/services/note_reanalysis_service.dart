@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/ai_preferences.dart';
 import 'api_url_resolver.dart';
+import 'server_quota_service.dart';
 import 'supabase_auth_service.dart';
 
 /// Chiede al backend di ri-trascrivere e rianalizzare una nota gia' esistente,
@@ -44,6 +45,8 @@ class NoteReanalysisService {
     if (response.statusCode == 401 || response.statusCode == 403) {
       throw Exception('Sessione scaduta. Effettua di nuovo l\'accesso.');
     }
+    final quotaError = ServerQuotaService.parseError(response);
+    if (quotaError != null) throw quotaError;
     if (response.statusCode == 409) {
       throw Exception(
         'L\'audio non e\' piu\' sul server: impossibile rifare l\'analisi.',

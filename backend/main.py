@@ -16,6 +16,7 @@ from auth import get_current_user
 from database import Base, engine, ensure_schema, get_db
 from models.note import NoteDB  # noqa: F401
 from models.job import JobDB  # noqa: F401
+from models.server_usage import UserServerUsage  # noqa: F401
 from models.upload_session import (  # noqa: F401
     CHUNK_SIZE,
     LEGACY_UPLOAD_MAX_BYTES,
@@ -23,6 +24,7 @@ from models.upload_session import (  # noqa: F401
 )
 from services.chat_service import NoteChatRequest, stream_note_chat
 from services.job_service import get_job, start_upload_job
+from services.quota_service import raise_if_cannot_accept, usage_snapshot
 from services.upload_session_service import (
     cleanup_expired_sessions,
     complete_session,
@@ -71,6 +73,7 @@ class UploadSessionCreate(BaseModel):
     language: str | None = None
     custom_prompt: str | None = None
     available_tags: list[str] | None = None
+    duration_seconds: float | None = Field(default=None, ge=0)
 
 
 @app.on_event("startup")
@@ -99,6 +102,7 @@ def _metadata_from_body(body: UploadSessionCreate) -> dict[str, Any]:
         "language": body.language,
         "custom_prompt": body.custom_prompt,
         "available_tags": body.available_tags,
+        "duration_seconds": body.duration_seconds,
     }
 
 
@@ -124,11 +128,19 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/usage/quota")
+async def read_server_quota(
+    current_user_id: str = Depends(get_current_user),
+):
+    return usage_snapshot(current_user_id)
+
+
 @app.post("/upload-audio/sessions")
 async def create_upload_session(
     body: UploadSessionCreate,
     current_user_id: str = Depends(get_current_user),
 ):
+    raise_if_cannot_accept(current_user_id, body.duration_seconds)
     session = create_session(
         user_id=current_user_id,
         filename=body.filename,
@@ -179,6 +191,7 @@ async def complete_upload_session(
         upload_id,
         user_id=current_user_id,
     )
+    raise_if_cannot_accept(current_user_id, metadata.get("duration_seconds"))
     job_id = str(uuid.uuid4())
     start_upload_job(
         job_id,
@@ -190,6 +203,7 @@ async def complete_upload_session(
         language=metadata.get("language"),
         custom_prompt=metadata.get("custom_prompt"),
         available_tags=metadata.get("available_tags"),
+        estimated_seconds=metadata.get("duration_seconds"),
     )
     return {
         "success": True,
@@ -217,7 +231,9 @@ async def upload_audio(
     custom_prompt: str | None = Form(default=None),
     available_tags: str | None = Form(default=None),
     note_id: str | None = Form(default=None),
+    duration_seconds: float | None = Form(default=None),
 ):
+    raise_if_cannot_accept(current_user_id, duration_seconds)
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
     original_name = Path(file.filename or "audio").name
@@ -247,6 +263,7 @@ async def upload_audio(
         language=language,
         custom_prompt=custom_prompt,
         available_tags=_parse_tags_list(available_tags),
+        estimated_seconds=duration_seconds,
     )
 
     return {
@@ -328,6 +345,7 @@ async def reanalyze_note(
             detail="Audio file no longer on the server: cannot re-transcribe",
         )
 
+    raise_if_cannot_accept(current_user_id, note.audio_duration)
     job_id = str(uuid.uuid4())
     start_upload_job(
         job_id,
@@ -339,6 +357,7 @@ async def reanalyze_note(
         language=body.language,
         custom_prompt=body.custom_prompt,
         available_tags=body.available_tags,
+        estimated_seconds=note.audio_duration,
     )
     return {
         "success": True,

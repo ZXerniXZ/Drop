@@ -3,11 +3,17 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from pathlib import Path
+
 from database import SessionLocal
 from models.job import JobDB
 from models.note import NoteDB
-from services.audio_segmentation_service import transcribe_audio_long_verbose
+from services.audio_segmentation_service import (
+    probe_duration_seconds,
+    transcribe_audio_long_verbose,
+)
 from services.llm_service import process_transcript
+from services.quota_service import QuotaExceeded, consume, refund
 
 
 def _utc_now() -> datetime:
@@ -167,8 +173,16 @@ async def run_upload_job(
     language: str | None,
     custom_prompt: str | None,
     available_tags: list[str] | None,
+    estimated_seconds: float | None = None,
 ) -> None:
+    billed_seconds = 0.0
     try:
+        probed = probe_duration_seconds(Path(file_path))
+        to_bill = probed if probed and probed > 0 else estimated_seconds
+        if to_bill and to_bill > 0:
+            consume(user_id, to_bill)
+            billed_seconds = to_bill
+
         _update_job_progress(job_id, phase="transcribing")
 
         def on_transcribe_progress(current: int, total: int) -> None:
@@ -226,7 +240,20 @@ async def run_upload_job(
             error=None,
             note_id=note_id,
         )
+    except QuotaExceeded:
+        _update_job(
+            job_id,
+            status="failed",
+            phase="failed",
+            clear_progress=True,
+            error=(
+                "Hai esaurito le 2 ore di trascrizione incluse. "
+                "Aggiungi una chiave OpenRouter in Account."
+            ),
+        )
     except Exception as exc:
+        if billed_seconds:
+            refund(user_id, billed_seconds)
         _update_job(
             job_id,
             status="failed",
@@ -247,6 +274,7 @@ def start_upload_job(
     language: str | None,
     custom_prompt: str | None,
     available_tags: list[str] | None,
+    estimated_seconds: float | None = None,
 ) -> None:
     create_job(job_id, user_id=user_id)
     asyncio.create_task(
@@ -260,5 +288,6 @@ def start_upload_job(
             language=language,
             custom_prompt=custom_prompt,
             available_tags=available_tags,
+            estimated_seconds=estimated_seconds,
         )
     )

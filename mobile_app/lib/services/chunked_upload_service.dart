@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import '../models/ai_preferences.dart';
 import 'api_url_resolver.dart';
 import 'audio_binary_store.dart';
+import 'server_quota_service.dart';
 
 const int chunkedUploadChunkSize = 2 * 1024 * 1024;
 const int legacyUploadMaxBytes = 4 * 1024 * 1024;
@@ -25,6 +26,7 @@ class ChunkedUploadService {
     required AiPreferences prefs,
     required List<String> availableTags,
     String? noteId,
+    int? durationSeconds,
     String? existingUploadSessionId,
     int? lastUploadedChunkIndex,
     UploadProgressCallback? onProgress,
@@ -70,6 +72,7 @@ class ChunkedUploadService {
         prefs: prefs,
         availableTags: availableTags,
         noteId: noteId,
+        durationSeconds: durationSeconds,
       );
       await onSessionProgress?.call(uploadId, -1);
       startChunk = 0;
@@ -108,6 +111,7 @@ class ChunkedUploadService {
     required AiPreferences prefs,
     required List<String> availableTags,
     String? noteId,
+    int? durationSeconds,
   }) async {
     final url = await ApiUrlResolver.resolveEndpoint('/upload-audio/sessions');
     final body = <String, dynamic>{
@@ -120,6 +124,9 @@ class ChunkedUploadService {
     };
     if (noteId != null && noteId.isNotEmpty) {
       body['note_id'] = noteId;
+    }
+    if (durationSeconds != null && durationSeconds > 0) {
+      body['duration_seconds'] = durationSeconds;
     }
     if (prefs.customPrompt.trim().isNotEmpty) {
       body['custom_prompt'] = prefs.customPrompt.trim();
@@ -135,6 +142,8 @@ class ChunkedUploadService {
     );
 
     _ensureAuthOrThrow(response);
+    final quotaError = ServerQuotaService.parseError(response);
+    if (quotaError != null) throw quotaError;
     if (response.statusCode != 200) {
       throw Exception(_errorDetail(response, 'Creazione sessione upload fallita'));
     }
@@ -159,6 +168,8 @@ class ChunkedUploadService {
       headers: {'Authorization': 'Bearer $accessToken'},
     );
     _ensureAuthOrThrow(response);
+    final quotaError = ServerQuotaService.parseError(response);
+    if (quotaError != null) throw quotaError;
     if (response.statusCode != 200) {
       throw Exception(_errorDetail(response, 'Lettura sessione upload fallita'));
     }
@@ -210,6 +221,8 @@ class ChunkedUploadService {
       body: bytes,
     );
     _ensureAuthOrThrow(response);
+    final quotaError = ServerQuotaService.parseError(response);
+    if (quotaError != null) throw quotaError;
     if (response.statusCode != 200) {
       throw Exception(_errorDetail(response, 'Upload chunk $index fallito'));
     }
@@ -224,6 +237,8 @@ class ChunkedUploadService {
       headers: {'Authorization': 'Bearer $accessToken'},
     );
     _ensureAuthOrThrow(response);
+    final quotaError = ServerQuotaService.parseError(response);
+    if (quotaError != null) throw quotaError;
     if (response.statusCode != 200) {
       throw Exception(_errorDetail(response, 'Completamento upload fallito'));
     }
