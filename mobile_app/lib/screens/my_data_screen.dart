@@ -5,12 +5,10 @@ import '../models/ai_preferences.dart';
 import '../models/note_tags_config.dart';
 import '../services/app_preferences_service.dart';
 import '../services/audio_storage_service.dart';
-import '../services/local_database_service.dart';
 import '../services/openrouter_client.dart';
 import '../services/server_health_service.dart';
 import '../services/server_quota_service.dart';
 import '../services/supabase_auth_service.dart';
-import '../services/usage_stats_service.dart';
 import '../theme/drop_motion.dart';
 import '../theme/drop_theme.dart';
 import 'record_orb_preview_screen.dart';
@@ -25,7 +23,6 @@ class MyDataScreen extends StatefulWidget {
 class _MyDataScreenState extends State<MyDataScreen> {
   AiPreferences _aiPrefs = const AiPreferences();
   NoteTagsConfig _noteTags = const NoteTagsConfig();
-  UsageStats? _usage;
   ServerQuota? _serverQuota;
   AudioStorageInfo? _storage;
   ServerStatus _serverStatus = ServerStatus.checking;
@@ -56,7 +53,6 @@ class _MyDataScreenState extends State<MyDataScreen> {
       _serverStatus = ServerStatus.checking;
     });
 
-    final notes = await LocalDatabaseService.instance.getAllNotes();
     final prefs = await AppPreferencesService.instance.loadAiPreferences();
     final tags = await AppPreferencesService.instance.loadNoteTags();
     final apiKey = await AppPreferencesService.instance.loadOpenRouterApiKey();
@@ -69,7 +65,6 @@ class _MyDataScreenState extends State<MyDataScreen> {
     _promptController.text = prefs.customPrompt;
     _apiKeyController.text = apiKey ?? '';
     setState(() {
-      _usage = UsageStatsService.compute(notes);
       _serverQuota = quota;
       _aiPrefs = prefs;
       _noteTags = tags;
@@ -239,9 +234,12 @@ class _MyDataScreenState extends State<MyDataScreen> {
             ],
           ),
           const SizedBox(height: 28),
-          const _SettingsSectionLabel('Attività'),
+          const _SettingsSectionLabel('Piano incluso'),
           const SizedBox(height: 8),
-          _UsageSummary(stats: _usage!),
+          _QuotaSummary(
+            quota: _serverQuota,
+            hasCustomKey: _hasCustomApiKey,
+          ),
           const SizedBox(height: 28),
           const _SettingsSectionLabel('Intelligenza artificiale'),
           const SizedBox(height: 8),
@@ -443,17 +441,35 @@ class _SettingsActionRow extends StatelessWidget {
   }
 }
 
-class _UsageSummary extends StatelessWidget {
-  const _UsageSummary({required this.stats});
+class _QuotaSummary extends StatelessWidget {
+  const _QuotaSummary({
+    required this.quota,
+    required this.hasCustomKey,
+  });
 
-  final UsageStats stats;
+  final ServerQuota? quota;
+  final bool hasCustomKey;
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final minutesLabel = stats.minutesThisMonth >= 10
-        ? stats.minutesThisMonth.round().toString()
-        : stats.minutesThisMonth.toStringAsFixed(1);
+    final used = quota?.usedSeconds ?? 0;
+    final limit = quota?.limitSeconds ?? 7200;
+    final remaining = quota?.remainingSeconds ?? 7200;
+    final exhausted = quota?.isExhausted ?? false;
+    final progress = limit <= 0 ? 1.0 : (used / limit).clamp(0.0, 1.0);
+    final percent = (progress * 100).round();
+
+    final headline = hasCustomKey
+        ? 'Chiave personale'
+        : exhausted
+            ? 'Esaurito'
+            : ServerQuota.formatSeconds(remaining);
+    final subtitle = hasCustomKey
+        ? 'Le nuove trascrizioni non usano il piano Drop.'
+        : exhausted
+            ? 'Aggiungi una chiave OpenRouter per continuare.'
+            : 'di ${ServerQuota.formatSeconds(limit)} sul server Drop';
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -469,12 +485,12 @@ class _UsageSummary extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Minuti questo mese',
+                  hasCustomKey ? 'Trascrizione' : 'Tempo rimasto',
                   style: Theme.of(context).textTheme.labelSmall,
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '$minutesLabel / ${stats.monthlyGoalMinutes} min',
+                  headline,
                   style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                         fontSize: 22,
                         fontWeight: FontWeight.w300,
@@ -482,7 +498,7 @@ class _UsageSummary extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '${stats.notesThisMonth} note · \$${stats.estimatedApiCostUsd.toStringAsFixed(2)} API stimate',
+                  subtitle,
                   style: Theme.of(context).textTheme.labelSmall,
                 ),
               ],
@@ -495,12 +511,15 @@ class _UsageSummary extends StatelessWidget {
               alignment: Alignment.center,
               children: [
                 CircularProgressIndicator(
-                  value: stats.progress.clamp(0.0, 1.0),
+                  value: hasCustomKey ? 1 : progress,
                   strokeWidth: 3,
                   backgroundColor: DropColors.border(context),
+                  color: exhausted && !hasCustomKey
+                      ? DropColors.recordRed
+                      : null,
                 ),
                 Text(
-                  '${stats.progressPercent}%',
+                  hasCustomKey ? 'OK' : '$percent%',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         fontWeight: FontWeight.bold,
                         fontSize: 10,
