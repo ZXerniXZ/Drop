@@ -17,6 +17,7 @@ import '../models/transcript_segment.dart';
 import '../services/app_preferences_service.dart';
 import '../models/note_filters.dart';
 import '../services/chunked_upload_service.dart';
+import '../services/drop_api_headers.dart';
 import '../services/audio_binary_store.dart';
 import '../services/audio_recording_config.dart';
 import '../services/cloud_sync_service.dart';
@@ -94,9 +95,9 @@ class _RecorderScreenState extends State<RecorderScreen>
   }
 
   Future<void> _openOrbPreview() async {
-    await Navigator.of(context).push(
-      DropPageRoute<void>(page: const RecordOrbPreviewScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(DropPageRoute<void>(page: const RecordOrbPreviewScreen()));
     await _loadOrbStyle();
   }
 
@@ -129,7 +130,9 @@ class _RecorderScreenState extends State<RecorderScreen>
   }
 
   void _onForegroundTaskData(Object data) {
-    if (data is Map && data['action'] == 'stop' && (_isRecording || _isPaused)) {
+    if (data is Map &&
+        data['action'] == 'stop' &&
+        (_isRecording || _isPaused)) {
       _stopRecording();
     }
   }
@@ -214,7 +217,8 @@ class _RecorderScreenState extends State<RecorderScreen>
     required AudioNote placeholder,
     required String audioPath,
   }) {
-    final raw = data['raw_transcription'] as String? ??
+    final raw =
+        data['raw_transcription'] as String? ??
         data['transcription'] as String? ??
         '';
     final formatted = data['formatted_transcription'] as String? ?? raw;
@@ -231,8 +235,9 @@ class _RecorderScreenState extends State<RecorderScreen>
       }
     }
 
-    final segments =
-        TranscriptSegment.listFromResponse(data['transcript_segments']);
+    final segments = TranscriptSegment.listFromResponse(
+      data['transcript_segments'],
+    );
     final serverDuration = (data['audio_duration'] as num?)?.round();
 
     return placeholder.copyWith(
@@ -285,9 +290,11 @@ class _RecorderScreenState extends State<RecorderScreen>
     const maxGatewayFailures = 20;
     var gatewayFailures = 0;
     final minAttempts = 200;
-    final durationBasedAttempts = ((durationSeconds * 2) / pollInterval.inSeconds)
-        .ceil()
-        .clamp(minAttempts, 3600);
+    final durationBasedAttempts =
+        ((durationSeconds * 2) / pollInterval.inSeconds).ceil().clamp(
+          minAttempts,
+          3600,
+        );
     final maxAttempts = durationBasedAttempts;
 
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
@@ -297,7 +304,7 @@ class _RecorderScreenState extends State<RecorderScreen>
       final accessToken = await _requireAccessToken();
       final response = await http.get(
         Uri.parse(url),
-        headers: {'Authorization': 'Bearer $accessToken'},
+        headers: DropApiHeaders.auth(accessToken),
       );
 
       if (response.statusCode == 401 || response.statusCode == 403) {
@@ -343,10 +350,12 @@ class _RecorderScreenState extends State<RecorderScreen>
         final phase = NoteAnalysisPhase.fromString(job['phase'] as String?);
         if (phase != null) {
           final progress = job['progress'];
-          final current =
-              progress is Map ? (progress['current'] as num?)?.toInt() ?? 0 : 0;
-          final total =
-              progress is Map ? (progress['total'] as num?)?.toInt() ?? 0 : 0;
+          final current = progress is Map
+              ? (progress['current'] as num?)?.toInt() ?? 0
+              : 0;
+          final total = progress is Map
+              ? (progress['total'] as num?)?.toInt() ?? 0
+              : 0;
           onProgress(phase, current, total);
         }
       }
@@ -389,7 +398,7 @@ class _RecorderScreenState extends State<RecorderScreen>
     if (fileSize <= legacyUploadMaxBytes) {
       final url = await _resolveUploadUrl();
       final request = http.MultipartRequest('POST', Uri.parse(url));
-      request.headers['Authorization'] = 'Bearer $accessToken';
+      request.headers.addAll(DropApiHeaders.auth(accessToken));
       final bytes = await AudioBinaryStore.instance.readAll(filePath);
       final filename = AudioBinaryStore.instance.filenameOf(filePath);
       request.files.add(
@@ -427,7 +436,9 @@ class _RecorderScreenState extends State<RecorderScreen>
         if (response.statusCode == 401 || response.statusCode == 403) {
           errorDetail = 'Accesso richiesto. Effettua di nuovo l\'accesso.';
         }
-        throw Exception('Upload fallito (${response.statusCode}): $errorDetail');
+        throw Exception(
+          'Upload fallito (${response.statusCode}): $errorDetail',
+        );
       }
     } else {
       jobId = await ChunkedUploadService.instance.uploadFileAndStartJob(
@@ -442,17 +453,21 @@ class _RecorderScreenState extends State<RecorderScreen>
             ? placeholder.uploadedChunks - 1
             : null,
         onProgress: (uploadedChunks, totalChunks) {
-          unawaited(_reportAnalysisProgress(
-            placeholder.id,
-            phase: NoteAnalysisPhase.uploading,
-            current: uploadedChunks,
-            total: totalChunks,
-          ));
+          unawaited(
+            _reportAnalysisProgress(
+              placeholder.id,
+              phase: NoteAnalysisPhase.uploading,
+              current: uploadedChunks,
+              total: totalChunks,
+            ),
+          );
         },
         onSessionProgress: (uploadSessionId, uploadedChunkIndex) async {
           final progressNote = placeholder.copyWith(
             uploadSessionId: uploadSessionId,
-            uploadedChunks: uploadedChunkIndex >= 0 ? uploadedChunkIndex + 1 : 0,
+            uploadedChunks: uploadedChunkIndex >= 0
+                ? uploadedChunkIndex + 1
+                : 0,
           );
           await LocalDatabaseService.instance.saveNote(progressNote);
           if (!mounted) return;
@@ -465,12 +480,14 @@ class _RecorderScreenState extends State<RecorderScreen>
       jobId,
       durationSeconds: durationSeconds,
       onProgress: (phase, current, total) {
-        unawaited(_reportAnalysisProgress(
-          placeholder.id,
-          phase: phase,
-          current: current,
-          total: total,
-        ));
+        unawaited(
+          _reportAnalysisProgress(
+            placeholder.id,
+            phase: phase,
+            current: current,
+            total: total,
+          ),
+        );
       },
     );
   }
@@ -483,7 +500,8 @@ class _RecorderScreenState extends State<RecorderScreen>
     try {
       final prefs = await AppPreferencesService.instance.loadAiPreferences();
       final tagsConfig = await AppPreferencesService.instance.loadNoteTags();
-      final apiKey = await AppPreferencesService.instance.loadOpenRouterApiKey();
+      final apiKey = await AppPreferencesService.instance
+          .loadOpenRouterApiKey();
 
       final index = _notes.indexWhere((n) => n.id == noteId);
       if (index == -1) return;
@@ -671,9 +689,9 @@ class _RecorderScreenState extends State<RecorderScreen>
     _amplitudeSub = _recorder
         .onAmplitudeChanged(const Duration(milliseconds: 80))
         .listen((amp) {
-      if (!mounted) return;
-      setState(() => _amplitudeLevel = _normalizeAmplitude(amp.current));
-    });
+          if (!mounted) return;
+          setState(() => _amplitudeLevel = _normalizeAmplitude(amp.current));
+        });
 
     setState(() {
       _isRecording = true;
@@ -760,11 +778,13 @@ class _RecorderScreenState extends State<RecorderScreen>
         );
       }
 
-      unawaited(_processUpload(
-        noteId: noteId,
-        filePath: savedPath,
-        durationSeconds: recordedDuration.inSeconds,
-      ));
+      unawaited(
+        _processUpload(
+          noteId: noteId,
+          filePath: savedPath,
+          durationSeconds: recordedDuration.inSeconds,
+        ),
+      );
     } finally {
       _stopping = false;
     }
@@ -813,7 +833,8 @@ class _RecorderScreenState extends State<RecorderScreen>
       final toDelete = path ?? _currentPath;
       if (toDelete != null) {
         try {
-          final handle = toDelete.startsWith('blob:') || toDelete.startsWith('mem:')
+          final handle =
+              toDelete.startsWith('blob:') || toDelete.startsWith('mem:')
               ? await AudioBinaryStore.instance.adoptRecorderOutput(toDelete)
               : toDelete;
           await AudioBinaryStore.instance.delete(handle);
@@ -864,11 +885,13 @@ class _RecorderScreenState extends State<RecorderScreen>
     if (!mounted) return;
     _updateNoteInList(retrying);
 
-    unawaited(_processUpload(
-      noteId: note.id,
-      filePath: path,
-      durationSeconds: note.durationSeconds,
-    ));
+    unawaited(
+      _processUpload(
+        noteId: note.id,
+        filePath: path,
+        durationSeconds: note.durationSeconds,
+      ),
+    );
   }
 
   /// Ri-trascrive e rianalizza una nota gia' completata usando l'audio che il
@@ -901,12 +924,14 @@ class _RecorderScreenState extends State<RecorderScreen>
         jobId,
         durationSeconds: note.durationSeconds,
         onProgress: (phase, current, total) {
-          unawaited(_reportAnalysisProgress(
-            note.id,
-            phase: phase,
-            current: current,
-            total: total,
-          ));
+          unawaited(
+            _reportAnalysisProgress(
+              note.id,
+              phase: phase,
+              current: current,
+              total: total,
+            ),
+          );
         },
       );
       if (result == null || !mounted) return;
@@ -944,9 +969,9 @@ class _RecorderScreenState extends State<RecorderScreen>
       if (!mounted) return;
       _updateNoteInList(restored);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Rianalisi fallita: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Rianalisi fallita: $e')));
     }
   }
 
@@ -1002,9 +1027,9 @@ class _RecorderScreenState extends State<RecorderScreen>
                   'Su questo dispositivo la registrazione continua solo con Drop aperto e lo schermo acceso.',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: DropColors.muted(context),
-                        height: 1.35,
-                      ),
+                    color: DropColors.muted(context),
+                    height: 1.35,
+                  ),
                 ),
               ),
             DropBottomNav(
@@ -1063,22 +1088,21 @@ class _RecorderScreenState extends State<RecorderScreen>
                       const SizedBox(width: 10),
                       Text(
                         'Drop',
-                        style:
-                            Theme.of(context).textTheme.headlineMedium?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  letterSpacing: -0.3,
-                                ),
+                        style: Theme.of(context).textTheme.headlineMedium
+                            ?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: -0.3,
+                            ),
                       ),
                     ],
                   )
                 : Text(
                     'Impostazioni',
                     key: const ValueKey('settings-header'),
-                    style:
-                        Theme.of(context).textTheme.headlineMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: -0.3,
-                            ),
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -0.3,
+                    ),
                   ),
           ),
           const Spacer(),
@@ -1086,9 +1110,9 @@ class _RecorderScreenState extends State<RecorderScreen>
             Text(
               '${_filteredNotes.length} note',
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    fontSize: 11,
-                    color: DropColors.muted(context),
-                  ),
+                fontSize: 11,
+                color: DropColors.muted(context),
+              ),
             ),
           const SizedBox(width: 8),
           IconButton(
@@ -1119,8 +1143,7 @@ class _RecorderScreenState extends State<RecorderScreen>
       filtersVisible: _filtersVisible,
       onSearchChanged: (q) =>
           setState(() => _filters = _filters.copyWith(searchQuery: q)),
-      onToggleFilters: () =>
-          setState(() => _filtersVisible = !_filtersVisible),
+      onToggleFilters: () => setState(() => _filtersVisible = !_filtersVisible),
       onTagChanged: (tag) => setState(
         () => _filters = _filters.copyWith(
           tagFilter: tag,

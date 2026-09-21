@@ -7,13 +7,15 @@ import 'package:http/http.dart' as http;
 import '../models/ai_preferences.dart';
 import 'api_url_resolver.dart';
 import 'audio_binary_store.dart';
+import 'drop_api_headers.dart';
 import 'server_quota_service.dart';
 
 const int chunkedUploadChunkSize = 2 * 1024 * 1024;
 const int legacyUploadMaxBytes = 4 * 1024 * 1024;
 const int maxChunkRetries = 3;
 
-typedef UploadProgressCallback = void Function(int uploadedChunks, int totalChunks);
+typedef UploadProgressCallback =
+    void Function(int uploadedChunks, int totalChunks);
 
 class ChunkedUploadService {
   ChunkedUploadService._();
@@ -31,7 +33,7 @@ class ChunkedUploadService {
     int? lastUploadedChunkIndex,
     UploadProgressCallback? onProgress,
     Future<void> Function(String uploadSessionId, int uploadedChunks)?
-        onSessionProgress,
+    onSessionProgress,
   }) async {
     final store = AudioBinaryStore.instance;
     if (!await store.exists(filePath)) {
@@ -134,10 +136,7 @@ class ChunkedUploadService {
 
     final response = await http.post(
       Uri.parse(url),
-      headers: {
-        'Authorization': 'Bearer $accessToken',
-        'Content-Type': 'application/json',
-      },
+      headers: DropApiHeaders.json(accessToken),
       body: jsonEncode(body),
     );
 
@@ -145,7 +144,9 @@ class ChunkedUploadService {
     final quotaError = ServerQuotaService.parseError(response);
     if (quotaError != null) throw quotaError;
     if (response.statusCode != 200) {
-      throw Exception(_errorDetail(response, 'Creazione sessione upload fallita'));
+      throw Exception(
+        _errorDetail(response, 'Creazione sessione upload fallita'),
+      );
     }
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -165,13 +166,15 @@ class ChunkedUploadService {
     );
     final response = await http.get(
       Uri.parse(url),
-      headers: {'Authorization': 'Bearer $accessToken'},
+      headers: DropApiHeaders.auth(accessToken),
     );
     _ensureAuthOrThrow(response);
     final quotaError = ServerQuotaService.parseError(response);
     if (quotaError != null) throw quotaError;
     if (response.statusCode != 200) {
-      throw Exception(_errorDetail(response, 'Lettura sessione upload fallita'));
+      throw Exception(
+        _errorDetail(response, 'Lettura sessione upload fallita'),
+      );
     }
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
@@ -200,7 +203,9 @@ class ChunkedUploadService {
         }
       }
     }
-    throw Exception('Chunk $index fallito dopo $maxChunkRetries tentativi: $lastError');
+    throw Exception(
+      'Chunk $index fallito dopo $maxChunkRetries tentativi: $lastError',
+    );
   }
 
   Future<void> _uploadChunk({
@@ -215,7 +220,7 @@ class ChunkedUploadService {
     final response = await http.put(
       Uri.parse(url),
       headers: {
-        'Authorization': 'Bearer $accessToken',
+        ...DropApiHeaders.auth(accessToken),
         'Content-Type': 'application/octet-stream',
       },
       body: bytes,
@@ -234,7 +239,7 @@ class ChunkedUploadService {
     );
     final response = await http.post(
       Uri.parse(url),
-      headers: {'Authorization': 'Bearer $accessToken'},
+      headers: DropApiHeaders.auth(accessToken),
     );
     _ensureAuthOrThrow(response);
     final quotaError = ServerQuotaService.parseError(response);

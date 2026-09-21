@@ -9,5 +9,7 @@ class WebSession {
 
   static void reload() {}
 
+  static void open(String url) {}
+
   static void hideHtmlSplash() {}
 }

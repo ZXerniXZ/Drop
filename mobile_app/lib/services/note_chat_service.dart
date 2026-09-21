@@ -9,6 +9,7 @@ import '../models/chat_stream_event.dart';
 import '../models/note_chat_message.dart';
 import 'api_url_resolver.dart';
 import 'app_preferences_service.dart';
+import 'drop_api_headers.dart';
 import 'http_client.dart';
 import 'local_database_service.dart';
 import 'openrouter_client.dart';
@@ -70,11 +71,13 @@ class NoteChatService {
         'tags': note.tag,
       },
       'speaker_view': sd.speakerView
-          .map((b) => {
-                'speaker': b.speaker,
-                'text': b.text,
-                if (b.time != null) 'time': b.time,
-              })
+          .map(
+            (b) => {
+              'speaker': b.speaker,
+              'text': b.text,
+              if (b.time != null) 'time': b.time,
+            },
+          )
           .toList(),
     };
   }
@@ -116,7 +119,9 @@ class NoteChatService {
     required String message,
   }) async* {
     final prefs = await AppPreferencesService.instance.loadAiPreferences();
-    final history = await LocalDatabaseService.instance.getChatMessages(note.id);
+    final history = await LocalDatabaseService.instance.getChatMessages(
+      note.id,
+    );
     var historyForApi = history;
     if (historyForApi.isNotEmpty &&
         historyForApi.last.isUser &&
@@ -157,7 +162,9 @@ class NoteChatService {
     final url = await ApiUrlResolver.resolveEndpoint('/chat-note/stream');
     final accessToken = SupabaseAuthService.instance.currentAccessToken;
     if (accessToken == null || accessToken.isEmpty) {
-      yield const ChatStreamError('Sessione scaduta. Effettua di nuovo l\'accesso.');
+      yield const ChatStreamError(
+        'Sessione scaduta. Effettua di nuovo l\'accesso.',
+      );
       return;
     }
 
@@ -172,8 +179,7 @@ class NoteChatService {
     final client = createHttpClient();
     try {
       final request = http.Request('POST', Uri.parse(url))
-        ..headers['Content-Type'] = 'application/json'
-        ..headers['Authorization'] = 'Bearer $accessToken'
+        ..headers.addAll(DropApiHeaders.json(accessToken))
         ..body = body;
 
       final response = await client.send(request);

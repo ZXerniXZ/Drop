@@ -36,6 +36,10 @@ class WebSession {
     web.window.location.reload();
   }
 
+  static void open(String url) {
+    web.window.location.assign(url);
+  }
+
   static void hideHtmlSplash() {
     web.document.getElementById('loading')?.remove();
   }

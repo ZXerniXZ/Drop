@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'api_url_resolver.dart';
 import 'audio_binary_store.dart';
 import 'audio_recording_config.dart';
+import 'drop_api_headers.dart';
 import 'supabase_auth_service.dart';
 
 /// Recupera dal backend l'audio di una nota quando non e' piu' sul telefono,
@@ -36,10 +37,7 @@ class NoteAudioService {
 
   /// Restituisce l'handle locale dell'audio, scaricandolo se serve.
   /// Restituisce null se il server non ha piu' il file.
-  Future<String?> ensureLocalAudio(
-    String noteId, {
-    String? currentPath,
-  }) async {
+  Future<String?> ensureLocalAudio(String noteId, {String? currentPath}) async {
     final local = await localPathIfExists(noteId, currentPath: currentPath);
     if (local != null) return local;
     return downloadAudio(noteId);
@@ -55,7 +53,7 @@ class NoteAudioService {
     final client = http.Client();
     try {
       final request = http.Request('GET', Uri.parse(url))
-        ..headers['Authorization'] = 'Bearer $token';
+        ..headers.addAll(DropApiHeaders.auth(token));
       final response = await client.send(request);
 
       if (response.statusCode == 404) return null;

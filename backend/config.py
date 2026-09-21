@@ -19,6 +19,33 @@ SEGMENT_TARGET_SECONDS = float(os.getenv("SEGMENT_TARGET_SECONDS", "300"))
 # Ore di audio che un utente puo' far trascrivere con la chiave OpenRouter del server.
 SERVER_AUDIO_QUOTA_SECONDS = float(os.getenv("SERVER_AUDIO_QUOTA_SECONDS", "7200"))
 
+
+def _int_env(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+# Build più vecchie di questa vengono bloccate in app e sulle API.
+MIN_APP_VERSION = os.getenv("MIN_APP_VERSION", "1.0.4").strip() or "1.0.4"
+MIN_APP_BUILD = _int_env("MIN_APP_BUILD", 30)
+APP_UPDATE_ANDROID_URL = os.getenv(
+    "APP_UPDATE_ANDROID_URL",
+    "https://github.com/ZXerniXZ/Drop/releases/latest",
+).strip()
+APP_UPDATE_WEB_URL = os.getenv(
+    "APP_UPDATE_WEB_URL",
+    "https://drop-app-3x2.pages.dev",
+).strip()
+APP_UPDATE_MESSAGE = os.getenv(
+    "APP_UPDATE_MESSAGE",
+    "Questa versione di Drop non è più supportata. Aggiorna per continuare.",
+).strip()
+
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./drop_backend.db")
 # Stesso HS256 secret di GoTrue (JWT_SECRET). URL pubblico Auth senza /auth/v1.
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "") or os.getenv(

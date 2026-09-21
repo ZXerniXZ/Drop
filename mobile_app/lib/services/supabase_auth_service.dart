@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/supabase_config.dart';
+import 'drop_api_headers.dart';
 
 class SupabaseAuthService {
   SupabaseAuthService._();
@@ -23,7 +24,7 @@ class SupabaseAuthService {
     if (token == null || token.isEmpty) {
       throw StateError('Utente non autenticato');
     }
-    return {'Authorization': 'Bearer $token'};
+    return DropApiHeaders.auth(token);
   }
 
   Future<void> signInWithEmail({

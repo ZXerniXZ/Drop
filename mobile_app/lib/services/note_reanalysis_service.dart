@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/ai_preferences.dart';
 import 'api_url_resolver.dart';
+import 'drop_api_headers.dart';
 import 'server_quota_service.dart';
 import 'supabase_auth_service.dart';
 
@@ -25,15 +26,14 @@ class NoteReanalysisService {
       throw Exception('Sessione scaduta. Effettua di nuovo l\'accesso.');
     }
 
-    final url = await ApiUrlResolver.resolveEndpoint('/notes/$noteId/reanalyze');
+    final url = await ApiUrlResolver.resolveEndpoint(
+      '/notes/$noteId/reanalyze',
+    );
     final customPrompt = prefs.customPrompt.trim();
 
     final response = await http.post(
       Uri.parse(url),
-      headers: {
-        'Authorization': 'Bearer $token',
-        'Content-Type': 'application/json',
-      },
+      headers: DropApiHeaders.json(token),
       body: jsonEncode({
         'ai_model': prefs.model.openRouterId,
         'language': prefs.transcriptionLanguage.name,

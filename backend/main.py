@@ -22,6 +22,7 @@ from models.upload_session import (  # noqa: F401
     LEGACY_UPLOAD_MAX_BYTES,
     UploadSessionDB,
 )
+from services.app_version import AppVersionMiddleware, version_payload
 from services.chat_service import NoteChatRequest, stream_note_chat
 from services.job_service import get_job, start_upload_job
 from services.quota_service import raise_if_cannot_accept, usage_snapshot
@@ -48,6 +49,7 @@ AUDIO_MEDIA_TYPES = {
 
 app = FastAPI(title="Drop Backend")
 
+app.add_middleware(AppVersionMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=config.CORS_ORIGIN_REGEX,
@@ -126,6 +128,11 @@ def _note_audio_path(note: NoteDB) -> Path | None:
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/app/version")
+async def app_version():
+    return version_payload()
 
 
 @app.get("/usage/quota")

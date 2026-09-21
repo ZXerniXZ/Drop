@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'api_url_resolver.dart';
+import 'drop_api_headers.dart';
 import 'supabase_auth_service.dart';
 
 class ServerQuotaExceeded implements Exception {
@@ -70,7 +71,7 @@ class ServerQuotaService {
       final url = await ApiUrlResolver.resolveEndpoint('/usage/quota');
       final response = await http.get(
         Uri.parse(url),
-        headers: {'Authorization': 'Bearer $token'},
+        headers: DropApiHeaders.auth(token),
       );
       if (response.statusCode != 200) return null;
       final body = jsonDecode(response.body);

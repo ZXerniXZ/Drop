@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/audio_note.dart';
 import 'api_url_resolver.dart';
+import 'drop_api_headers.dart';
 import 'local_database_service.dart';
 import 'supabase_auth_service.dart';
 
@@ -20,7 +21,7 @@ class CloudSyncService {
       final url = await ApiUrlResolver.resolveEndpoint('/notes');
       final response = await http.get(
         Uri.parse(url),
-        headers: {'Authorization': 'Bearer $token'},
+        headers: DropApiHeaders.auth(token),
       );
 
       if (response.statusCode != 200) return 0;
@@ -32,8 +33,7 @@ class CloudSyncService {
       for (final item in body) {
         if (item is! Map<String, dynamic>) continue;
 
-        final remoteId =
-            item['note_id'] as String? ?? item['id'] as String?;
+        final remoteId = item['note_id'] as String? ?? item['id'] as String?;
         if (remoteId == null || remoteId.isEmpty) continue;
 
         if (await LocalDatabaseService.instance.noteExists(remoteId)) continue;
