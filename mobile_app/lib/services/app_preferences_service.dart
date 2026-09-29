@@ -21,6 +21,7 @@ class AppPreferencesService {
   static const _openRouterApiKey = 'openrouter_api_key';
   static const _recordOrbStyleKey = 'dev_record_orb_style';
   static const _iosInstallBannerDismissedKey = 'ios_install_banner_dismissed';
+  static const _webGetAppBannerDismissedKey = 'web_get_app_banner_dismissed';
   static const _pendingShareKey = 'pending_share_token';
 
   static const _secureStorage = FlutterSecureStorage(
@@ -142,6 +143,16 @@ class AppPreferencesService {
   Future<void> setIosInstallBannerDismissed() async {
     await init();
     await _store.setBool(_iosInstallBannerDismissedKey, true);
+  }
+
+  Future<bool> loadWebGetAppBannerDismissed() async {
+    await init();
+    return _store.getBool(_webGetAppBannerDismissedKey) ?? false;
+  }
+
+  Future<void> setWebGetAppBannerDismissed() async {
+    await init();
+    await _store.setBool(_webGetAppBannerDismissedKey, true);
   }
 
   Future<void> savePendingShareToken(String token) async {

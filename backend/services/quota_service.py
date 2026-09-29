@@ -134,20 +134,58 @@ def _billed_seconds(user_id: str) -> float:
     db = SessionLocal()
     try:
         row = _ensure_row(db, user_id)
+        _release_shared_overcharge(db, row)
         return float(row.billed_seconds or 0.0)
     finally:
         db.close()
+
+
+def _duration_sum(db, user_id: str, *, shared: bool) -> float:
+    stmt = select(func.coalesce(func.sum(NoteDB.audio_duration), 0.0)).where(
+        NoteDB.user_id == user_id
+    )
+    if shared:
+        stmt = stmt.where(NoteDB.source_share_token.is_not(None))
+    else:
+        stmt = stmt.where(NoteDB.source_share_token.is_(None))
+    return float(db.scalar(stmt) or 0.0)
+
+
+def _release_shared_overcharge(db, row: UserServerUsage) -> None:
+    """Toglie dal piano i secondi di note ricevute via link, se erano stati sommati."""
+    own = _duration_sum(db, row.user_id, shared=False)
+    shared = _duration_sum(db, row.user_id, shared=True)
+    if shared <= 0:
+        return
+    excess = float(row.billed_seconds or 0.0) - own
+    release = min(max(excess, 0.0), shared)
+    if release < 0.5:
+        return
+    result = db.execute(
+        text(
+            "UPDATE user_server_usage "
+            "SET billed_seconds = billed_seconds - :release, "
+            "updated_at = :now "
+            "WHERE user_id = :user_id "
+            "AND billed_seconds - :own >= :release - 0.01"
+        ),
+        {
+            "release": release,
+            "own": own,
+            "now": _utc_now().isoformat(),
+            "user_id": row.user_id,
+        },
+    )
+    db.commit()
+    if result.rowcount:
+        db.refresh(row)
 
 
 def _ensure_row(db, user_id: str) -> UserServerUsage:
     row = db.get(UserServerUsage, user_id)
     if row is not None:
         return row
-    total = db.scalar(
-        select(func.coalesce(func.sum(NoteDB.audio_duration), 0.0)).where(
-            NoteDB.user_id == user_id
-        )
-    )
+    total = _duration_sum(db, user_id, shared=False)
     row = UserServerUsage(
         user_id=user_id,
         billed_seconds=float(total or 0.0),

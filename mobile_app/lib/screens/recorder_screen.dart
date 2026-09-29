@@ -15,7 +15,9 @@ import '../models/note_structured_data.dart';
 import '../models/note_tags_config.dart';
 import '../models/record_orb_style.dart';
 import '../models/transcript_segment.dart';
+import '../services/app_identity.dart';
 import '../services/app_preferences_service.dart';
+import '../services/app_update_service.dart';
 import '../models/note_filters.dart';
 import '../services/chunked_upload_service.dart';
 import '../services/drop_api_headers.dart';
@@ -40,6 +42,7 @@ import '../widgets/drop_logo.dart';
 import '../widgets/note_list_card.dart';
 import '../widgets/staggered_entrance.dart';
 import 'note_detail_screen.dart';
+import 'update_required_screen.dart';
 import 'my_data_screen.dart';
 import 'record_orb_preview_screen.dart';
 
@@ -776,6 +779,18 @@ class _RecorderScreenState extends State<RecorderScreen>
   }
 
   Future<void> _startRecording() async {
+    final policy = await AppUpdateService.instance.fetchPolicy();
+    if (!mounted) return;
+    if (policy != null &&
+        AppIdentity.isBelow(policy.minVersion, policy.minBuild)) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => UpdateRequiredScreen(policy: policy),
+        ),
+      );
+      return;
+    }
+
     final hasPermission = await _recorder.hasPermission();
     if (!hasPermission) {
       if (!mounted) return;

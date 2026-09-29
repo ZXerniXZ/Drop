@@ -367,7 +367,7 @@ GOTRUE_EXTERNAL_GITHUB_CLIENT_ID=...
 GOTRUE_EXTERNAL_GITHUB_SECRET=...
 ```
 
-Poi `docker compose up -d`. Senza questo passo Google/GitHub non chiudono il login. Email/password funziona comunque (`GOTRUE_MAILER_AUTOCONFIRM=true`, niente SMTP).
+Poi `docker compose up -d`. Senza questo passo Google/GitHub non chiudono il login. Email/password entra subito finché `GOTRUE_MAILER_AUTOCONFIRM=true`. Per le mail di conferma usa Brevo: verifica `drop-prj.xyz`, metti `SMTP_USER` e `SMTP_PASS` nel `.env` della Pi e solo allora imposta `GOTRUE_MAILER_AUTOCONFIRM=false`.
 
 ### 4. Secret GitHub e rebuild app
 

@@ -65,11 +65,14 @@ services:
       GOTRUE_JWT_ISSUER: supabase
 
       GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
-      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      # false solo quando SMTP_USER e SMTP_PASS sono nel .env della Pi.
+      GOTRUE_MAILER_AUTOCONFIRM: ${GOTRUE_MAILER_AUTOCONFIRM:-true}
       GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL:-noreply@drop-prj.xyz}
-      GOTRUE_SMTP_HOST: ${SMTP_HOST:-localhost}
-      GOTRUE_SMTP_PORT: ${SMTP_PORT:-25}
-      GOTRUE_SMTP_SENDER_NAME: Drop
+      GOTRUE_SMTP_HOST: ${SMTP_HOST:-smtp-relay.brevo.com}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT:-587}
+      GOTRUE_SMTP_USER: ${SMTP_USER:-}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS:-}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-Drop}
 
       GOTRUE_EXTERNAL_PHONE_ENABLED: "false"
 

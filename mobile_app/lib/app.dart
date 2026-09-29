@@ -8,6 +8,7 @@ import 'services/supabase_auth_service.dart';
 import 'theme/drop_motion.dart';
 import 'theme/drop_theme.dart';
 import 'widgets/ios_install_banner.dart';
+import 'widgets/web_get_app_banner.dart';
 
 Future<void> startDropApp() async {
   await bootstrapDrop();
@@ -44,6 +45,7 @@ class _DropAppState extends State<DropApp> {
       builder: (context, child) {
         return Column(
           children: [
+            const WebGetAppBanner(),
             const IosInstallBanner(),
             Expanded(child: child ?? const SizedBox.shrink()),
           ],
@@ -53,7 +55,8 @@ class _DropAppState extends State<DropApp> {
         stream: SupabaseAuthService.instance.authStateChanges,
         builder: (context, snapshot) {
           final session = SupabaseAuthService.instance.currentSession;
-          if (session == null) {
+          final confirmed = session?.user.emailConfirmedAt != null;
+          if (session == null || !confirmed) {
             return const LoginScreen();
           }
           return RecorderScreen(

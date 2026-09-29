@@ -6,6 +6,9 @@ import 'package:web/web.dart' as web;
 class WebSession {
   WebSession._();
 
+  static JSObject? _deferredInstall;
+  static bool _listeningForInstall = false;
+
   static bool get isIosSafari {
     final ua = web.window.navigator.userAgent;
     final isIos = ua.contains('iPhone') ||
@@ -38,6 +41,31 @@ class WebSession {
 
   static void open(String url) {
     web.window.location.assign(url);
+  }
+
+  static void openExternal(String url) {
+    web.window.open(url, '_blank');
+  }
+
+  static void listenForInstallPrompt() {
+    if (_listeningForInstall) return;
+    _listeningForInstall = true;
+    web.window.addEventListener(
+      'beforeinstallprompt',
+      ((web.Event event) {
+        event.preventDefault();
+        _deferredInstall = event as JSObject;
+      }).toJS,
+    );
+  }
+
+  static bool get canPromptInstall => _deferredInstall != null;
+
+  static Future<void> promptInstall() async {
+    final prompt = _deferredInstall;
+    if (prompt == null) return;
+    prompt.callMethod('prompt'.toJS);
+    _deferredInstall = null;
   }
 
   static void hideHtmlSplash() {

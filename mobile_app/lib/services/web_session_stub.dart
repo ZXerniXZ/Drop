@@ -11,5 +11,13 @@ class WebSession {
 
   static void open(String url) {}
 
+  static void openExternal(String url) {}
+
+  static void listenForInstallPrompt() {}
+
+  static bool get canPromptInstall => false;
+
+  static Future<void> promptInstall() async {}
+
   static void hideHtmlSplash() {}
 }

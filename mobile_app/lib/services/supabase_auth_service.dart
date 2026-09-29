@@ -38,7 +38,11 @@ class SupabaseAuthService {
     required String email,
     required String password,
   }) async {
-    await _client.auth.signUp(email: email, password: password);
+    await _client.auth.signUp(
+      email: email,
+      password: password,
+      emailRedirectTo: SupabaseConfig.oauthRedirectUri,
+    );
   }
 
   Future<void> signInWithGoogle() => _signInWithOAuth(OAuthProvider.google);

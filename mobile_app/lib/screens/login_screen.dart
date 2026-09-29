@@ -33,7 +33,9 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       await action();
       if (!mounted) return;
-      if (_isSignUp) {
+      final pendingConfirmation =
+          _isSignUp && SupabaseAuthService.instance.currentUser?.emailConfirmedAt == null;
+      if (pendingConfirmation) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Controlla la email per confermare la registrazione'),

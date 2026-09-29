@@ -23,6 +23,19 @@ def _with_db():
     return SessionLocal()
 
 
+def _note_came_from_share(user_id: str, note_id: str | None) -> bool:
+    if not (note_id or "").strip():
+        return False
+    db = _with_db()
+    try:
+        note = db.get(NoteDB, note_id)
+        if note is None or note.user_id != user_id:
+            return False
+        return bool((note.source_share_token or "").strip())
+    finally:
+        db.close()
+
+
 def create_job(job_id: str, *, user_id: str) -> None:
     db = _with_db()
     try:
@@ -190,7 +203,7 @@ async def run_upload_job(
     try:
         probed = probe_duration_seconds(Path(file_path))
         to_bill = probed if probed and probed > 0 else estimated_seconds
-        if to_bill and to_bill > 0:
+        if to_bill and to_bill > 0 and not _note_came_from_share(user_id, note_id):
             consume(user_id, to_bill)
             billed_seconds = to_bill
 

@@ -28,6 +28,8 @@ class AppUpdateService {
 
   static final AppUpdateService instance = AppUpdateService._();
 
+  AppVersionPolicy? lastPolicy;
+
   Future<void> loadIdentity() async {
     final info = await PackageInfo.fromPlatform();
     final name = info.version.split('+').first.trim();
@@ -50,7 +52,7 @@ class AppUpdateService {
       if (minVersion == null || minVersion.isEmpty || minBuild == null) {
         return null;
       }
-      return AppVersionPolicy(
+      final policy = AppVersionPolicy(
         minVersion: minVersion,
         minBuild: minBuild,
         message:
@@ -61,6 +63,8 @@ class AppUpdateService {
             'https://github.com/ZXerniXZ/Drop/releases/latest',
         webUrl: body['web_url'] as String? ?? 'https://drop-app-3x2.pages.dev',
       );
+      lastPolicy = policy;
+      return policy;
     } catch (_) {
       return null;
     }

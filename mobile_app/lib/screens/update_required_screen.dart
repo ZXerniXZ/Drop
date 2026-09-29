@@ -121,6 +121,18 @@ class _UpdateRequiredScreenState extends State<UpdateRequiredScreen> {
                     child: Text(buttonLabel),
                   ),
                 ),
+                if (Navigator.of(context).canPop()) ...[
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: Text(
+                      'Chiudi',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.62),
+                      ),
+                    ),
+                  ),
+                ],
                 if (_error != null) ...[
                   const SizedBox(height: 12),
                   Text(

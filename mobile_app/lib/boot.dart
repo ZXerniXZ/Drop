@@ -25,6 +25,7 @@ class _DropBootAppState extends State<DropBootApp> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      WebSession.listenForInstallPrompt();
       WebSession.hideHtmlSplash();
       unawaited(_start());
     });
@@ -37,7 +38,8 @@ class _DropBootAppState extends State<DropBootApp> {
     try {
       await AppUpdateService.instance.loadIdentity();
       final policy = await AppUpdateService.instance.fetchPolicy();
-      if (policy != null &&
+      if (!kIsWeb &&
+          policy != null &&
           AppIdentity.isBelow(policy.minVersion, policy.minBuild)) {
         slowTimer.cancel();
         if (!mounted) return;

@@ -487,7 +487,8 @@ async def reanalyze_note(
             detail="Audio file no longer on the server: cannot re-transcribe",
         )
 
-    raise_if_cannot_accept(current_user_id, note.audio_duration)
+    if not (note.source_share_token or "").strip():
+        raise_if_cannot_accept(current_user_id, note.audio_duration)
     job_id = _start_analysis_job(
         user_id=current_user_id,
         note_id=note.id,
