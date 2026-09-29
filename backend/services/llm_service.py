@@ -10,6 +10,7 @@ from config import (
     OPENROUTER_API_KEY,
     OPENROUTER_LLM_MODEL,
 )
+from services.languages import display_name
 from services.speaker_assembly import (
     build_from_raw_transcript,
     build_speaker_view,
@@ -40,34 +41,35 @@ MODEL_ALIASES: dict[str, str] = {
     "google/gemini-2.5-pro": "google/gemini-2.5-pro",
 }
 
-SYSTEM_PROMPT_TEMPLATE = """Sei l'assistente di un'app di note vocali stile Plaud Note.
-Analizza la trascrizione e restituisci SOLO un oggetto JSON valido con questo schema esatto:
+SYSTEM_PROMPT_TEMPLATE = """You are the assistant for a voice-notes app.
+Analyze the transcript and return ONLY a valid JSON object with this exact schema:
 
 {{
-  "title": "titolo breve e descrittivo della nota (max 60 caratteri, in italiano)",
-  "summary": "stringa Markdown con sezioni ## Overview, ## Key Decisions e altre sezioni utili",
-  "highlights": ["action item o punto chiave 1", "punto 2"],
+  "title": "short descriptive title (max 60 characters, written in {output_language})",
+  "summary": "Markdown string with ## Overview, ## Key Decisions and other useful sections, written in {output_language}",
+  "highlights": ["action item or key point 1", "point 2"],
   "key_data": {{
-    "location": "luogo dedotto o stringa vuota",
-    "participants": ["nome o Speaker 0", "Speaker 1"],
-    "tags": "UNO dalla lista consentita"
+    "location": "inferred place or empty string",
+    "participants": ["name or Speaker 0", "Speaker 1"],
+    "tags": "EXACTLY ONE from the allowed list"
   }},
   "speaker_ids": [0, 0, 1, 1, 0]
 }}
 
-Tag consentiti (scegline esattamente UNO per key_data.tags): {tag_list}
+Allowed tags (pick exactly ONE for key_data.tags): {tag_list}
 
-Regole:
-- title: sintetico, riflette il contenuto principale, senza data/ora.
-- highlights: 2-8 elementi concreti e actionable quando possibile.
-- summary: puoi riassumere liberamente.
-- speaker_ids: diarizzazione COMPATTA. Un intero per ogni segmento numerato ricevuto
-  (stessa lunghezza dell'elenco). 0 = Speaker 0, 1 = Speaker 1, ecc.
-  NON riscrivere il testo dei segmenti: il server lo monta da Whisper.
-  Se monologo o non sai distinguere, usa tutti 0.
-- key_data.tags: DEVE essere uno dei tag consentiti sopra.
-- NON includere speaker_view ne' formatted_transcript.
-- Rispondi SOLO con JSON, senza markdown fence o testo extra."""
+Rules:
+- title, summary, and highlights MUST be written entirely in {output_language}.
+- title: concise, reflects the main content, no date/time.
+- highlights: 2-8 concrete, actionable items when possible.
+- summary: you may paraphrase freely.
+- speaker_ids: COMPACT diarization. One integer per numbered segment received
+  (same length as the list). 0 = Speaker 0, 1 = Speaker 1, etc.
+  Do NOT rewrite segment text: the server assembles it from Whisper.
+  If it is a monologue or you cannot tell speakers apart, use all 0.
+- key_data.tags: MUST be one of the allowed tags above.
+- Do NOT include speaker_view or formatted_transcript.
+- Reply with JSON only, no markdown fences or extra text."""
 
 DEFAULT_TAGS = [
     "Meeting",
@@ -81,11 +83,19 @@ DEFAULT_TAGS = [
 ]
 
 
-def _build_system_prompt(available_tags: list[str] | None = None) -> str:
+def _build_system_prompt(
+    available_tags: list[str] | None = None,
+    *,
+    output_language: str | None = None,
+) -> str:
     tags = [t.strip() for t in (available_tags or DEFAULT_TAGS) if t.strip()]
     if not tags:
         tags = DEFAULT_TAGS
-    return SYSTEM_PROMPT_TEMPLATE.format(tag_list=" | ".join(tags))
+    language_label = display_name(output_language) or "English"
+    return SYSTEM_PROMPT_TEMPLATE.format(
+        tag_list=" | ".join(tags),
+        output_language=language_label,
+    )
 
 
 def resolve_llm_model(ai_model: str | None) -> str:
@@ -167,7 +177,7 @@ def _parse_llm_json(
         raise ValueError("LLM response missing summary")
 
     if not title:
-        title = "Nota vocale"
+        title = "Voice note"
 
     return {
         "title": title[:80],
@@ -242,10 +252,10 @@ async def process_transcript(
         segments=segments,
     )
     tags_pool = [t.strip() for t in (available_tags or DEFAULT_TAGS) if t.strip()]
-
-    if language and language.strip().lower() not in {"automatic", "automatico", ""}:
+    output_label = display_name(language)
+    if output_label:
         user_prompt = (
-            f"Lingua richiesta per l'output: {language.strip()}\n\n{user_prompt}"
+            f"Write title, summary, and highlights in {output_label}.\n\n{user_prompt}"
         )
 
     headers = {
@@ -258,7 +268,7 @@ async def process_transcript(
     payload = {
         "model": resolved_model,
         "messages": [
-            {"role": "system", "content": _build_system_prompt(tags_pool)},
+            {"role": "system", "content": _build_system_prompt(tags_pool, output_language=language)},
             {"role": "user", "content": user_prompt},
         ],
         "response_format": {"type": "json_object"},

@@ -9,6 +9,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../services/api_url_resolver.dart';
 import '../models/ai_preferences.dart';
+import '../models/app_language.dart';
 import '../models/audio_note.dart';
 import '../models/note_structured_data.dart';
 import '../models/note_tags_config.dart';
@@ -24,6 +25,7 @@ import '../services/cloud_sync_service.dart';
 import '../services/local_database_service.dart';
 import '../services/note_audio_service.dart';
 import '../services/note_reanalysis_service.dart';
+import '../services/note_share_service.dart';
 import '../services/openrouter_client.dart';
 import '../services/recording_foreground_service.dart';
 import '../services/server_quota_service.dart';
@@ -31,6 +33,7 @@ import '../services/supabase_auth_service.dart';
 import '../theme/drop_motion.dart';
 import '../theme/drop_theme.dart';
 import '../utils/note_filter_utils.dart';
+import '../widgets/analysis_language_dialog.dart';
 import '../widgets/note_filter_bar.dart';
 import '../widgets/drop_bottom_nav.dart';
 import '../widgets/drop_logo.dart';
@@ -151,6 +154,38 @@ class _RecorderScreenState extends State<RecorderScreen>
       _isLoadingNotes = false;
     });
     unawaited(_syncNotesFromCloud());
+    unawaited(_claimPendingShare());
+  }
+
+  Future<void> _claimPendingShare() async {
+    final token = await AppPreferencesService.instance.loadPendingShareToken();
+    if (token == null || token.isEmpty) return;
+
+    try {
+      final claimed = await NoteShareService.instance.claimShare(token);
+      await AppPreferencesService.instance.takePendingShareToken();
+      if (await LocalDatabaseService.instance.noteExists(claimed.id)) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Questa nota e\' gia\' nella tua libreria')),
+        );
+        return;
+      }
+      await LocalDatabaseService.instance.saveNote(claimed);
+      if (!mounted) return;
+      setState(() {
+        _notes.insert(0, claimed);
+        _activeTab = DropNavTab.file;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Nota ricevuta: ${claimed.title}')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e')),
+      );
+    }
   }
 
   Future<void> _syncNotesFromCloud() async {
@@ -253,6 +288,8 @@ class _RecorderScreenState extends State<RecorderScreen>
       durationSeconds: placeholder.durationSeconds > 0
           ? placeholder.durationSeconds
           : serverDuration,
+      sourceLanguage: data['source_language'] as String?,
+      outputLanguage: data['output_language'] as String?,
       clearAnalysisProgress: true,
     );
   }
@@ -379,7 +416,7 @@ class _RecorderScreenState extends State<RecorderScreen>
     );
   }
 
-  Future<Map<String, dynamic>?> _uploadViaBackend({
+  Future<CompletedUpload> _uploadAudioDeferred({
     required String filePath,
     required AudioNote placeholder,
     required AiPreferences prefs,
@@ -388,7 +425,6 @@ class _RecorderScreenState extends State<RecorderScreen>
   }) async {
     final accessToken = await _requireAccessToken();
     final fileSize = await AudioBinaryStore.instance.byteLength(filePath);
-    String jobId;
 
     await _reportAnalysisProgress(
       placeholder.id,
@@ -405,9 +441,12 @@ class _RecorderScreenState extends State<RecorderScreen>
         http.MultipartFile.fromBytes('file', bytes, filename: filename),
       );
       request.fields['ai_model'] = prefs.model.openRouterId;
-      request.fields['language'] = prefs.transcriptionLanguage.name;
+      request.fields['language'] = prefs.transcriptionLanguage.id;
+      request.fields['source_language'] = prefs.transcriptionLanguage.id;
+      request.fields['output_language'] = prefs.outputLanguage.id;
       request.fields['available_tags'] = jsonEncode(tags);
       request.fields['note_id'] = placeholder.id;
+      request.fields['defer_analysis'] = 'true';
       if (prefs.customPrompt.trim().isNotEmpty) {
         request.fields['custom_prompt'] = prefs.customPrompt.trim();
       }
@@ -418,14 +457,7 @@ class _RecorderScreenState extends State<RecorderScreen>
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final id = data['job_id'] as String?;
-        if (id == null || id.isEmpty) {
-          throw Exception('Risposta server senza job_id');
-        }
-        jobId = id;
-      } else {
+      if (response.statusCode != 200) {
         final quotaError = ServerQuotaService.parseError(response);
         if (quotaError != null) throw quotaError;
         var errorDetail = response.body;
@@ -440,56 +472,77 @@ class _RecorderScreenState extends State<RecorderScreen>
           'Upload fallito (${response.statusCode}): $errorDetail',
         );
       }
-    } else {
-      jobId = await ChunkedUploadService.instance.uploadFileAndStartJob(
-        filePath: filePath,
-        accessToken: accessToken,
-        prefs: prefs,
-        availableTags: tags,
-        noteId: placeholder.id,
-        durationSeconds: durationSeconds,
-        existingUploadSessionId: placeholder.uploadSessionId,
-        lastUploadedChunkIndex: placeholder.uploadedChunks > 0
-            ? placeholder.uploadedChunks - 1
-            : null,
-        onProgress: (uploadedChunks, totalChunks) {
-          unawaited(
-            _reportAnalysisProgress(
-              placeholder.id,
-              phase: NoteAnalysisPhase.uploading,
-              current: uploadedChunks,
-              total: totalChunks,
-            ),
-          );
-        },
-        onSessionProgress: (uploadSessionId, uploadedChunkIndex) async {
-          final progressNote = placeholder.copyWith(
-            uploadSessionId: uploadSessionId,
-            uploadedChunks: uploadedChunkIndex >= 0
-                ? uploadedChunkIndex + 1
-                : 0,
-          );
-          await LocalDatabaseService.instance.saveNote(progressNote);
-          if (!mounted) return;
-          _updateNoteInList(progressNote);
-        },
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final uploadId = data['upload_id'] as String?;
+      if (uploadId == null || uploadId.isEmpty) {
+        throw Exception('Risposta server senza upload_id');
+      }
+      return CompletedUpload(
+        uploadId: uploadId,
+        savedName: data['saved_name'] as String?,
       );
     }
 
-    return _pollUploadJob(
-      jobId,
+    return ChunkedUploadService.instance.uploadFile(
+      filePath: filePath,
+      accessToken: accessToken,
+      prefs: prefs,
+      availableTags: tags,
+      noteId: placeholder.id,
       durationSeconds: durationSeconds,
-      onProgress: (phase, current, total) {
+      deferAnalysis: true,
+      existingUploadSessionId: placeholder.uploadSessionId,
+      lastUploadedChunkIndex: placeholder.uploadedChunks > 0
+          ? placeholder.uploadedChunks - 1
+          : null,
+      onProgress: (uploadedChunks, totalChunks) {
         unawaited(
           _reportAnalysisProgress(
             placeholder.id,
-            phase: phase,
-            current: current,
-            total: total,
+            phase: NoteAnalysisPhase.uploading,
+            current: uploadedChunks,
+            total: totalChunks,
           ),
         );
       },
+      onSessionProgress: (uploadSessionId, uploadedChunkIndex) async {
+        final progressNote = placeholder.copyWith(
+          uploadSessionId: uploadSessionId,
+          uploadedChunks: uploadedChunkIndex >= 0
+              ? uploadedChunkIndex + 1
+              : 0,
+        );
+        await LocalDatabaseService.instance.saveNote(progressNote);
+        if (!mounted) return;
+        _updateNoteInList(progressNote);
+      },
     );
+  }
+
+  Future<LanguageChoice?> _askAnalysisLanguages({
+    required Future<DetectedLanguages> detection,
+    required AiPreferences prefs,
+  }) {
+    if (!mounted) return Future.value();
+    return showAnalysisLanguageDialog(
+      context: context,
+      detection: detection,
+      fallbackSource: prefs.transcriptionLanguage,
+      fallbackOutput: prefs.outputLanguage,
+    );
+  }
+
+  Future<void> _cancelAnalysis(String noteId, String message) async {
+    final index = _notes.indexWhere((n) => n.id == noteId);
+    if (index == -1) return;
+    final cancelled = _notes[index].copyWith(
+      analysisStatus: NoteAnalysisStatus.failed,
+      transcription: message,
+      clearAnalysisProgress: true,
+    );
+    await LocalDatabaseService.instance.saveNote(cancelled);
+    if (!mounted) return;
+    _updateNoteInList(cancelled);
   }
 
   Future<void> _processUpload({
@@ -505,7 +558,38 @@ class _RecorderScreenState extends State<RecorderScreen>
 
       final index = _notes.indexWhere((n) => n.id == noteId);
       if (index == -1) return;
-      final placeholder = _notes[index];
+      var placeholder = _notes[index];
+
+      final uploaded = await _uploadAudioDeferred(
+        filePath: filePath,
+        placeholder: placeholder,
+        prefs: prefs,
+        tags: tagsConfig.tags,
+        durationSeconds: durationSeconds,
+      );
+
+      final choice = await _askAnalysisLanguages(
+        detection: LanguageDetectService.instance.detectFromUpload(
+          uploaded.uploadId,
+          fallbackOutput: prefs.outputLanguage,
+        ),
+        prefs: prefs,
+      );
+      if (choice == null) {
+        await _cancelAnalysis(noteId, 'Analisi annullata');
+        return;
+      }
+
+      await AppPreferencesService.instance.saveAiPreferences(
+        prefs.copyWith(
+          transcriptionLanguage: choice.sourceLanguage,
+          outputLanguage: choice.outputLanguage,
+        ),
+      );
+      final analysisPrefs = prefs.copyWith(
+        transcriptionLanguage: choice.sourceLanguage,
+        outputLanguage: choice.outputLanguage,
+      );
 
       Map<String, dynamic>? result;
 
@@ -513,8 +597,20 @@ class _RecorderScreenState extends State<RecorderScreen>
         result = await OpenRouterClient.instance.processAudioFile(
           filePath: filePath,
           apiKey: apiKey,
-          prefs: prefs,
+          prefs: analysisPrefs,
           availableTags: tagsConfig.tags,
+          sourceLanguage: choice.sourceLanguage.id,
+          outputLanguage: choice.outputLanguage.id,
+        );
+        final latestIndex = _notes.indexWhere((n) => n.id == noteId);
+        final latest = latestIndex == -1 ? placeholder : _notes[latestIndex];
+        await NoteShareService.instance.publishNote(
+          latest.copyWith(
+            sourceLanguage: choice.sourceLanguage.id,
+            outputLanguage: choice.outputLanguage.id,
+          ),
+          uploadId: uploaded.uploadId,
+          prefs: analysisPrefs,
         );
       } else {
         final quota = await ServerQuotaService.instance.fetch();
@@ -527,12 +623,30 @@ class _RecorderScreenState extends State<RecorderScreen>
             remainingSeconds: quota.remainingSeconds,
           );
         }
-        result = await _uploadViaBackend(
-          filePath: filePath,
-          placeholder: placeholder,
-          prefs: prefs,
-          tags: tagsConfig.tags,
+        final accessToken = await _requireAccessToken();
+        final jobId = await ChunkedUploadService.instance.startAnalyze(
+          uploadId: uploaded.uploadId,
+          accessToken: accessToken,
+          prefs: analysisPrefs,
+          availableTags: tagsConfig.tags,
+          sourceLanguage: choice.sourceLanguage.id,
+          outputLanguage: choice.outputLanguage.id,
+          noteId: placeholder.id,
           durationSeconds: durationSeconds,
+        );
+        result = await _pollUploadJob(
+          jobId,
+          durationSeconds: durationSeconds,
+          onProgress: (phase, current, total) {
+            unawaited(
+              _reportAnalysisProgress(
+                placeholder.id,
+                phase: phase,
+                current: current,
+                total: total,
+              ),
+            );
+          },
         );
       }
 
@@ -542,11 +656,18 @@ class _RecorderScreenState extends State<RecorderScreen>
 
       final persistedPath =
           await _persistAudioFile(filePath, noteId) ?? filePath;
+      final refreshedIndex = _notes.indexWhere((n) => n.id == noteId);
+      placeholder = refreshedIndex == -1 ? placeholder : _notes[refreshedIndex];
       final note = _noteFromResponse(
         result,
         placeholder: placeholder,
         audioPath: persistedPath,
-      ).copyWith(clearUploadSession: true, uploadedChunks: 0);
+      ).copyWith(
+        clearUploadSession: true,
+        uploadedChunks: 0,
+        sourceLanguage: choice.sourceLanguage.id,
+        outputLanguage: choice.outputLanguage.id,
+      );
 
       await LocalDatabaseService.instance.saveNote(note);
       if (!mounted) return;
@@ -902,6 +1023,34 @@ class _RecorderScreenState extends State<RecorderScreen>
 
     final prefs = await AppPreferencesService.instance.loadAiPreferences();
     final tagsConfig = await AppPreferencesService.instance.loadNoteTags();
+    final choice = await _askAnalysisLanguages(
+      detection: LanguageDetectService.instance.detectFromNote(
+        note.id,
+        fallbackOutput: AppLanguage.outputFromKey(
+          note.outputLanguage ?? prefs.outputLanguage.id,
+        ),
+      ),
+      prefs: prefs.copyWith(
+        transcriptionLanguage: AppLanguage.fromKey(
+          note.sourceLanguage ?? prefs.transcriptionLanguage.id,
+        ),
+        outputLanguage: AppLanguage.outputFromKey(
+          note.outputLanguage ?? prefs.outputLanguage.id,
+        ),
+      ),
+    );
+    if (choice == null) return;
+
+    await AppPreferencesService.instance.saveAiPreferences(
+      prefs.copyWith(
+        transcriptionLanguage: choice.sourceLanguage,
+        outputLanguage: choice.outputLanguage,
+      ),
+    );
+    final analysisPrefs = prefs.copyWith(
+      transcriptionLanguage: choice.sourceLanguage,
+      outputLanguage: choice.outputLanguage,
+    );
 
     final processing = note.copyWith(
       analysisStatus: NoteAnalysisStatus.processing,
@@ -916,8 +1065,10 @@ class _RecorderScreenState extends State<RecorderScreen>
     try {
       final jobId = await NoteReanalysisService.instance.requestReanalysis(
         noteId: note.id,
-        prefs: prefs,
+        prefs: analysisPrefs,
         availableTags: tagsConfig.tags,
+        sourceLanguage: choice.sourceLanguage.id,
+        outputLanguage: choice.outputLanguage.id,
       );
 
       final result = await _pollUploadJob(
@@ -940,6 +1091,9 @@ class _RecorderScreenState extends State<RecorderScreen>
         result,
         placeholder: processing,
         audioPath: note.audioPath,
+      ).copyWith(
+        sourceLanguage: choice.sourceLanguage.id,
+        outputLanguage: choice.outputLanguage.id,
       );
       await LocalDatabaseService.instance.saveNote(updated);
       if (!mounted) return;

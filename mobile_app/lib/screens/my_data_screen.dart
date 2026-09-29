@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../config/api_config.dart';
 import '../models/ai_preferences.dart';
+import '../models/app_language.dart';
 import '../models/note_tags_config.dart';
 import '../services/app_preferences_service.dart';
 import '../services/audio_storage_service.dart';
@@ -561,13 +562,22 @@ class _AiPreferencesSection extends StatelessWidget {
             onChanged: (v) => onChanged(prefs.copyWith(model: v)),
           ),
           const SizedBox(height: 14),
-          _FieldLabel(label: 'Lingua trascrizione'),
+          _FieldLabel(label: 'Lingua registrazione'),
           const SizedBox(height: 8),
-          _StyledDropdown<TranscriptionLanguage>(
+          _StyledDropdown<AppLanguage>(
             value: prefs.transcriptionLanguage,
-            items: TranscriptionLanguage.values,
+            items: AppLanguage.sourceChoices,
             labelBuilder: (l) => l.label,
             onChanged: (v) => onChanged(prefs.copyWith(transcriptionLanguage: v)),
+          ),
+          const SizedBox(height: 14),
+          _FieldLabel(label: 'Lingua risultato'),
+          const SizedBox(height: 8),
+          _StyledDropdown<AppLanguage>(
+            value: prefs.outputLanguage,
+            items: AppLanguage.spoken,
+            labelBuilder: (l) => l.label,
+            onChanged: (v) => onChanged(prefs.copyWith(outputLanguage: v)),
           ),
           const SizedBox(height: 14),
           _FieldLabel(label: 'Prompt personalizzato'),
@@ -1059,6 +1069,7 @@ class _StyledDropdown<T> extends StatelessWidget {
           onChanged: (v) {
             if (v != null) onChanged(v);
           },
+          menuMaxHeight: 320,
         ),
       ),
     );

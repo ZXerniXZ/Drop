@@ -270,6 +270,59 @@ def delete_session(upload_id: str, *, user_id: str) -> None:
         db.close()
 
 
+def register_completed_upload(
+    *,
+    user_id: str,
+    filename: str,
+    file_path: str,
+    total_size: int,
+    metadata: dict[str, Any],
+) -> UploadSessionDB:
+    """Registra un file gia' salvato come sessione completed, per detect/analyze."""
+    upload_id = str(uuid.uuid4())
+    now = _utc_now()
+    session = UploadSessionDB(
+        id=upload_id,
+        user_id=user_id,
+        filename=Path(filename or "audio.m4a").name,
+        total_size=max(total_size, 1),
+        total_chunks=1,
+        received_chunks=[0],
+        metadata_json=metadata,
+        status="completed",
+        created_at=now,
+        expires_at=now + timedelta(hours=SESSION_TTL_HOURS),
+        assembled_path=file_path,
+    )
+    db = SessionLocal()
+    try:
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+        return session
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def get_owned_assembled(
+    upload_id: str, *, user_id: str
+) -> tuple[str, str, dict[str, Any]]:
+    db = SessionLocal()
+    try:
+        session = _get_owned_session(db, upload_id, user_id)
+        if not session.assembled_path:
+            raise HTTPException(status_code=409, detail="Upload not assembled")
+        path = Path(session.assembled_path)
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Audio file not available")
+        return path.name, str(path), session.metadata_json or {}
+    finally:
+        db.close()
+
+
 def compute_file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as f:

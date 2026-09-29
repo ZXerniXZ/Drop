@@ -15,6 +15,7 @@ import config  # noqa: F401
 from auth import get_current_user
 from database import Base, engine, ensure_schema, get_db
 from models.note import NoteDB  # noqa: F401
+from models.note_share import NoteShareDB  # noqa: F401
 from models.job import JobDB  # noqa: F401
 from models.server_usage import UserServerUsage  # noqa: F401
 from models.upload_session import (  # noqa: F401
@@ -25,13 +26,23 @@ from models.upload_session import (  # noqa: F401
 from services.app_version import AppVersionMiddleware, version_payload
 from services.chat_service import NoteChatRequest, stream_note_chat
 from services.job_service import get_job, start_upload_job
+from services.language_detect_service import detect_language_from_audio
 from services.quota_service import raise_if_cannot_accept, usage_snapshot
+from services.share_service import (
+    claim_share,
+    create_or_reuse_share,
+    get_active_share,
+    revoke_share,
+    upsert_published_note,
+)
 from services.upload_session_service import (
     cleanup_expired_sessions,
     complete_session,
     create_session,
     delete_session,
+    get_owned_assembled,
     get_session_status,
+    register_completed_upload,
     save_chunk,
 )
 
@@ -62,8 +73,37 @@ app.add_middleware(
 class NoteReanalyzeRequest(BaseModel):
     ai_model: str | None = None
     language: str | None = None
+    source_language: str | None = None
+    output_language: str | None = None
     custom_prompt: str | None = None
     available_tags: list[str] | None = None
+
+
+class AnalyzeUploadRequest(BaseModel):
+    note_id: str | None = None
+    ai_model: str | None = None
+    language: str | None = None
+    source_language: str | None = None
+    output_language: str | None = None
+    custom_prompt: str | None = None
+    available_tags: list[str] | None = None
+    duration_seconds: float | None = Field(default=None, ge=0)
+
+
+class NotePublishRequest(BaseModel):
+    note_id: str
+    upload_id: str | None = None
+    title: str = ""
+    summary: str = ""
+    formatted_transcription: str = ""
+    raw_transcription: str = ""
+    highlights: list[str] = Field(default_factory=list)
+    key_data: dict[str, Any] = Field(default_factory=dict)
+    speaker_view: list[dict[str, Any]] = Field(default_factory=list)
+    transcript_segments: list[dict[str, Any]] = Field(default_factory=list)
+    audio_duration: float | None = None
+    source_language: str | None = None
+    output_language: str | None = None
 
 
 class UploadSessionCreate(BaseModel):
@@ -73,9 +113,12 @@ class UploadSessionCreate(BaseModel):
     note_id: str | None = None
     ai_model: str | None = None
     language: str | None = None
+    source_language: str | None = None
+    output_language: str | None = None
     custom_prompt: str | None = None
     available_tags: list[str] | None = None
     duration_seconds: float | None = Field(default=None, ge=0)
+    defer_analysis: bool = False
 
 
 @app.on_event("startup")
@@ -102,9 +145,12 @@ def _metadata_from_body(body: UploadSessionCreate) -> dict[str, Any]:
         "note_id": body.note_id,
         "ai_model": body.ai_model,
         "language": body.language,
+        "source_language": body.source_language,
+        "output_language": body.output_language,
         "custom_prompt": body.custom_prompt,
         "available_tags": body.available_tags,
         "duration_seconds": body.duration_seconds,
+        "defer_analysis": body.defer_analysis,
     }
 
 
@@ -123,6 +169,50 @@ def _note_audio_path(note: NoteDB) -> Path | None:
     # Il nome arriva dal database, ma resta confinato a STORAGE_DIR per sicurezza.
     path = STORAGE_DIR / Path(note.audio_filename).name
     return path if path.is_file() else None
+
+
+def _start_analysis_job(
+    *,
+    user_id: str,
+    note_id: str | None,
+    file_path: str,
+    saved_name: str,
+    ai_model: str | None,
+    language: str | None,
+    source_language: str | None,
+    output_language: str | None,
+    custom_prompt: str | None,
+    available_tags: list[str] | None,
+    estimated_seconds: float | None,
+) -> str:
+    job_id = str(uuid.uuid4())
+    start_upload_job(
+        job_id,
+        user_id=user_id,
+        note_id=note_id,
+        file_path=file_path,
+        saved_name=saved_name,
+        ai_model=ai_model,
+        language=language,
+        custom_prompt=custom_prompt,
+        available_tags=available_tags,
+        estimated_seconds=estimated_seconds,
+        source_language=source_language,
+        output_language=output_language,
+    )
+    return job_id
+
+
+async def _detect_owned_audio(file_path: str) -> dict[str, Any]:
+    try:
+        detected = await detect_language_from_audio(file_path)
+    except Exception:
+        detected = None
+    return {
+        "detected_language": detected,
+        "source_language": detected or "automatic",
+        "output_language": detected,
+    }
 
 
 @app.get("/health")
@@ -147,7 +237,8 @@ async def create_upload_session(
     body: UploadSessionCreate,
     current_user_id: str = Depends(get_current_user),
 ):
-    raise_if_cannot_accept(current_user_id, body.duration_seconds)
+    if not body.defer_analysis:
+        raise_if_cannot_accept(current_user_id, body.duration_seconds)
     session = create_session(
         user_id=current_user_id,
         filename=body.filename,
@@ -198,16 +289,25 @@ async def complete_upload_session(
         upload_id,
         user_id=current_user_id,
     )
-    raise_if_cannot_accept(current_user_id, metadata.get("duration_seconds"))
-    job_id = str(uuid.uuid4())
-    start_upload_job(
-        job_id,
+    if not metadata.get("defer_analysis"):
+        raise_if_cannot_accept(current_user_id, metadata.get("duration_seconds"))
+    if metadata.get("defer_analysis"):
+        return {
+            "success": True,
+            "status": "uploaded",
+            "upload_id": upload_id,
+            "saved_name": saved_name,
+            "note_id": metadata.get("note_id"),
+        }
+    job_id = _start_analysis_job(
         user_id=current_user_id,
         note_id=metadata.get("note_id"),
         file_path=file_path,
         saved_name=saved_name,
         ai_model=metadata.get("ai_model"),
         language=metadata.get("language"),
+        source_language=metadata.get("source_language"),
+        output_language=metadata.get("output_language"),
         custom_prompt=metadata.get("custom_prompt"),
         available_tags=metadata.get("available_tags"),
         estimated_seconds=metadata.get("duration_seconds"),
@@ -217,6 +317,7 @@ async def complete_upload_session(
         "job_id": job_id,
         "status": "processing",
         "upload_id": upload_id,
+        "saved_name": saved_name,
     }
 
 
@@ -235,12 +336,16 @@ async def upload_audio(
     file: UploadFile = File(...),
     ai_model: str | None = Form(default=None),
     language: str | None = Form(default=None),
+    source_language: str | None = Form(default=None),
+    output_language: str | None = Form(default=None),
     custom_prompt: str | None = Form(default=None),
     available_tags: str | None = Form(default=None),
     note_id: str | None = Form(default=None),
     duration_seconds: float | None = Form(default=None),
+    defer_analysis: bool = Form(default=False),
 ):
-    raise_if_cannot_accept(current_user_id, duration_seconds)
+    if not defer_analysis:
+        raise_if_cannot_accept(current_user_id, duration_seconds)
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
     original_name = Path(file.filename or "audio").name
@@ -259,15 +364,43 @@ async def upload_audio(
         )
     await asyncio.to_thread(destination.write_bytes, content)
 
-    job_id = str(uuid.uuid4())
-    start_upload_job(
-        job_id,
+    metadata = {
+        "note_id": note_id,
+        "ai_model": ai_model,
+        "language": language,
+        "source_language": source_language,
+        "output_language": output_language,
+        "custom_prompt": custom_prompt,
+        "available_tags": _parse_tags_list(available_tags),
+        "duration_seconds": duration_seconds,
+        "defer_analysis": defer_analysis,
+    }
+    session = register_completed_upload(
+        user_id=current_user_id,
+        filename=original_name,
+        file_path=str(destination),
+        total_size=len(content),
+        metadata=metadata,
+    )
+
+    if defer_analysis:
+        return {
+            "success": True,
+            "status": "uploaded",
+            "upload_id": session.id,
+            "saved_name": saved_name,
+            "note_id": note_id,
+        }
+
+    job_id = _start_analysis_job(
         user_id=current_user_id,
         note_id=note_id,
         file_path=str(destination),
         saved_name=saved_name,
         ai_model=ai_model,
         language=language,
+        source_language=source_language,
+        output_language=output_language,
         custom_prompt=custom_prompt,
         available_tags=_parse_tags_list(available_tags),
         estimated_seconds=duration_seconds,
@@ -277,6 +410,8 @@ async def upload_audio(
         "success": True,
         "job_id": job_id,
         "status": "processing",
+        "upload_id": session.id,
+        "saved_name": saved_name,
     }
 
 
@@ -353,15 +488,15 @@ async def reanalyze_note(
         )
 
     raise_if_cannot_accept(current_user_id, note.audio_duration)
-    job_id = str(uuid.uuid4())
-    start_upload_job(
-        job_id,
+    job_id = _start_analysis_job(
         user_id=current_user_id,
         note_id=note.id,
         file_path=str(path),
         saved_name=note.audio_filename,
         ai_model=body.ai_model,
         language=body.language,
+        source_language=body.source_language,
+        output_language=body.output_language,
         custom_prompt=body.custom_prompt,
         available_tags=body.available_tags,
         estimated_seconds=note.audio_duration,
@@ -374,6 +509,137 @@ async def reanalyze_note(
     }
 
 
+@app.post("/upload-audio/sessions/{upload_id}/detect-language")
+async def detect_upload_language(
+    upload_id: str,
+    current_user_id: str = Depends(get_current_user),
+):
+    _saved_name, file_path, _metadata = get_owned_assembled(
+        upload_id, user_id=current_user_id
+    )
+    return await _detect_owned_audio(file_path)
+
+
+@app.post("/upload-audio/sessions/{upload_id}/analyze")
+async def analyze_uploaded_audio(
+    upload_id: str,
+    body: AnalyzeUploadRequest,
+    current_user_id: str = Depends(get_current_user),
+):
+    saved_name, file_path, metadata = get_owned_assembled(
+        upload_id, user_id=current_user_id
+    )
+    duration = body.duration_seconds
+    if duration is None:
+        duration = metadata.get("duration_seconds")
+    raise_if_cannot_accept(current_user_id, duration)
+    job_id = _start_analysis_job(
+        user_id=current_user_id,
+        note_id=body.note_id or metadata.get("note_id"),
+        file_path=file_path,
+        saved_name=saved_name,
+        ai_model=body.ai_model or metadata.get("ai_model"),
+        language=body.language or metadata.get("language"),
+        source_language=body.source_language or metadata.get("source_language"),
+        output_language=body.output_language or metadata.get("output_language"),
+        custom_prompt=body.custom_prompt or metadata.get("custom_prompt"),
+        available_tags=body.available_tags or metadata.get("available_tags"),
+        estimated_seconds=duration,
+    )
+    return {
+        "success": True,
+        "job_id": job_id,
+        "status": "processing",
+        "upload_id": upload_id,
+        "note_id": body.note_id or metadata.get("note_id"),
+    }
+
+
+@app.post("/notes/{note_id}/detect-language")
+async def detect_note_language(
+    note_id: str,
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    note = _get_owned_note(db, note_id, current_user_id)
+    path = _note_audio_path(note)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Audio file not available")
+    result = await _detect_owned_audio(str(path))
+    if result.get("output_language") is None and note.output_language:
+        result["output_language"] = note.output_language
+    return result
+
+
+@app.get("/notes/{note_id}/share")
+async def read_note_share(
+    note_id: str,
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    note = _get_owned_note(db, note_id, current_user_id)
+    share = get_active_share(db, note.id, current_user_id)
+    if share is None:
+        return {"active": False, "token": None}
+    return {"active": True, "token": share.token}
+
+
+@app.post("/notes/{note_id}/share")
+async def create_note_share(
+    note_id: str,
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    note = _get_owned_note(db, note_id, current_user_id)
+    share = create_or_reuse_share(db, note, current_user_id)
+    return {"success": True, "token": share.token, "active": True}
+
+
+@app.delete("/notes/{note_id}/share")
+async def delete_note_share(
+    note_id: str,
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    note = _get_owned_note(db, note_id, current_user_id)
+    revoked = revoke_share(db, note, current_user_id)
+    return {"success": True, "revoked": revoked}
+
+
+@app.post("/shares/{token}/claim")
+async def claim_shared_note(
+    token: str,
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    note, already = claim_share(db, token, current_user_id)
+    payload = note.to_result_dict()
+    payload["already_owned"] = already
+    return payload
+
+
+@app.post("/notes/publish")
+async def publish_note(
+    body: NotePublishRequest,
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    audio_filename = ""
+    if body.upload_id:
+        saved_name, _path, _metadata = get_owned_assembled(
+            body.upload_id, user_id=current_user_id
+        )
+        audio_filename = saved_name
+    note = upsert_published_note(
+        db,
+        user_id=current_user_id,
+        note_id=body.note_id,
+        payload=body.model_dump(),
+        audio_filename=audio_filename,
+    )
+    return note.to_result_dict()
+
+
 @app.post("/chat-note/stream")
 async def chat_note_stream(
     request: NoteChatRequest,
@@ -383,6 +649,8 @@ async def chat_note_stream(
     note = db.get(NoteDB, request.note_id)
     if note is not None and note.user_id != current_user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
+    if not request.output_language and note is not None:
+        request.output_language = note.output_language
     return StreamingResponse(
         stream_note_chat(request),
         media_type="text/event-stream",

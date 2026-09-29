@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import '../data/note_detail_mock_data.dart';
 import '../models/audio_note.dart';
 import '../models/note_structured_data.dart';
+import '../services/app_preferences_service.dart';
+import '../services/note_share_service.dart';
 import '../theme/drop_theme.dart';
 import '../widgets/drop_markdown.dart';
 import '../widgets/note_detail/ask_ai_bar.dart';
@@ -107,6 +109,80 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
     widget.onReanalyze!();
     // L'avanzamento si segue dalla lista: qui i dati sarebbero ormai vecchi.
     Navigator.of(context).pop();
+  }
+
+  Future<void> _shareNote() async {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+    try {
+      final prefs = await AppPreferencesService.instance.loadAiPreferences();
+      final url = await NoteShareService.instance.createShareUrl(
+        widget.note,
+        prefs: prefs,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      final action = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Condividi nota'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Chi apre il link accede a Drop e riceve una copia della nota nella propria libreria.',
+              ),
+              const SizedBox(height: 12),
+              SelectableText(
+                url,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await NoteShareService.instance.revokeShare(widget.note.id);
+                if (context.mounted) Navigator.pop(context, 'revoked');
+              },
+              child: const Text(
+                'Revoca',
+                style: TextStyle(color: DropColors.recordRed),
+              ),
+            ),
+            TextButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: url));
+                if (context.mounted) Navigator.pop(context, 'copied');
+              },
+              child: const Text('Copia link'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (action == 'copied') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Link copiato')),
+        );
+      } else if (action == 'revoked') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Link revocato')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e')),
+      );
+    }
   }
 
   void _onAskAiSend() {
@@ -237,6 +313,13 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
               icon: const Icon(Icons.autorenew, size: 22),
               color: DropColors.muted(context),
               tooltip: 'Rifai analisi',
+            ),
+          if (!widget.note.isFailed)
+            IconButton(
+              onPressed: _shareNote,
+              icon: const Icon(Icons.ios_share, size: 22),
+              color: DropColors.muted(context),
+              tooltip: 'Condividi',
             ),
           IconButton(
             onPressed: _confirmDelete,

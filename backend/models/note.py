@@ -35,6 +35,11 @@ class NoteDB(Base):
     )
     audio_duration: Mapped[float | None] = mapped_column(Float, nullable=True)
     audio_filename: Mapped[str] = mapped_column(String, nullable=False, default="")
+    source_language: Mapped[str | None] = mapped_column(String, nullable=True)
+    output_language: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_share_token: Mapped[str | None] = mapped_column(
+        String, index=True, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utc_now
     )
@@ -53,5 +58,7 @@ class NoteDB(Base):
             "speaker_view": self.speaker_view,
             "transcript_segments": self.transcript_segments or [],
             "audio_duration": self.audio_duration,
+            "source_language": self.source_language,
+            "output_language": self.output_language,
             "created_at": self.created_at.isoformat(),
         }

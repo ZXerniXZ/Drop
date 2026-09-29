@@ -4,6 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/ai_preferences.dart';
+import '../models/app_language.dart';
 import '../models/note_tags_config.dart';
 import '../models/record_orb_style.dart';
 
@@ -14,11 +15,13 @@ class AppPreferencesService {
 
   static const _modelKey = 'ai_model';
   static const _languageKey = 'transcription_language';
+  static const _outputLanguageKey = 'output_language';
   static const _promptKey = 'custom_prompt';
   static const _tagsKey = 'note_tags';
   static const _openRouterApiKey = 'openrouter_api_key';
   static const _recordOrbStyleKey = 'dev_record_orb_style';
   static const _iosInstallBannerDismissedKey = 'ios_install_banner_dismissed';
+  static const _pendingShareKey = 'pending_share_token';
 
   static const _secureStorage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
@@ -70,8 +73,12 @@ class AppPreferencesService {
     await init();
     return AiPreferences(
       model: AiModel.fromKey(_store.getString(_modelKey)),
-      transcriptionLanguage: TranscriptionLanguage.fromKey(
+      transcriptionLanguage: AppLanguage.fromKey(
         _store.getString(_languageKey),
+      ),
+      outputLanguage: AppLanguage.outputFromKey(
+        _store.getString(_outputLanguageKey) ??
+            _store.getString(_languageKey),
       ),
       customPrompt: _store.getString(_promptKey) ?? '',
     );
@@ -80,7 +87,8 @@ class AppPreferencesService {
   Future<void> saveAiPreferences(AiPreferences prefs) async {
     await init();
     await _store.setString(_modelKey, prefs.model.name);
-    await _store.setString(_languageKey, prefs.transcriptionLanguage.name);
+    await _store.setString(_languageKey, prefs.transcriptionLanguage.id);
+    await _store.setString(_outputLanguageKey, prefs.outputLanguage.id);
     await _store.setString(_promptKey, prefs.customPrompt);
   }
 
@@ -134,5 +142,28 @@ class AppPreferencesService {
   Future<void> setIosInstallBannerDismissed() async {
     await init();
     await _store.setBool(_iosInstallBannerDismissedKey, true);
+  }
+
+  Future<void> savePendingShareToken(String token) async {
+    await init();
+    final trimmed = token.trim();
+    if (trimmed.isEmpty) {
+      await _store.remove(_pendingShareKey);
+      return;
+    }
+    await _store.setString(_pendingShareKey, trimmed);
+  }
+
+  Future<String?> loadPendingShareToken() async {
+    await init();
+    final value = _store.getString(_pendingShareKey)?.trim();
+    if (value == null || value.isEmpty) return null;
+    return value;
+  }
+
+  Future<String?> takePendingShareToken() async {
+    final token = await loadPendingShareToken();
+    await _store.remove(_pendingShareKey);
+    return token;
   }
 }

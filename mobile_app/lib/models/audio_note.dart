@@ -60,6 +60,8 @@ class AudioNote {
     this.analysisPhase,
     this.analysisCurrent = 0,
     this.analysisTotal = 0,
+    this.sourceLanguage,
+    this.outputLanguage,
   });
 
   final String id;
@@ -80,6 +82,8 @@ class AudioNote {
   final NoteAnalysisPhase? analysisPhase;
   final int analysisCurrent;
   final int analysisTotal;
+  final String? sourceLanguage;
+  final String? outputLanguage;
 
   bool get isProcessing => analysisStatus.isProcessing;
 
@@ -144,6 +148,8 @@ class AudioNote {
     int? analysisCurrent,
     int? analysisTotal,
     bool clearAnalysisProgress = false,
+    String? sourceLanguage,
+    String? outputLanguage,
   }) {
     return AudioNote(
       id: id ?? this.id,
@@ -169,6 +175,8 @@ class AudioNote {
           clearAnalysisProgress ? 0 : (analysisCurrent ?? this.analysisCurrent),
       analysisTotal:
           clearAnalysisProgress ? 0 : (analysisTotal ?? this.analysisTotal),
+      sourceLanguage: sourceLanguage ?? this.sourceLanguage,
+      outputLanguage: outputLanguage ?? this.outputLanguage,
     );
   }
 
@@ -209,6 +217,8 @@ class AudioNote {
       transcriptSegments:
           TranscriptSegment.listFromResponse(data['transcript_segments']),
       durationSeconds: (data['audio_duration'] as num?)?.round() ?? 0,
+      sourceLanguage: data['source_language'] as String?,
+      outputLanguage: data['output_language'] as String?,
     );
   }
 
@@ -239,6 +249,8 @@ class AudioNote {
       ),
       analysisCurrent: map['analysis_current'] as int? ?? 0,
       analysisTotal: map['analysis_total'] as int? ?? 0,
+      sourceLanguage: map['source_language'] as String?,
+      outputLanguage: map['output_language'] as String?,
     );
   }
 
@@ -263,6 +275,8 @@ class AudioNote {
       'analysis_phase': analysisPhase?.dbValue,
       'analysis_current': analysisCurrent,
       'analysis_total': analysisTotal,
+      'source_language': sourceLanguage,
+      'output_language': outputLanguage,
     };
   }
 }

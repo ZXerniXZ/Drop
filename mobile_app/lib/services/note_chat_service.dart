@@ -173,6 +173,7 @@ class NoteChatService {
       'note_id': note.id,
       'history': historyPayload,
       'ai_model': aiModel,
+      'output_language': note.outputLanguage,
       'note_context': _noteContextFromAudioNote(note),
     });
 

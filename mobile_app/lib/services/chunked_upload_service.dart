@@ -17,12 +17,24 @@ const int maxChunkRetries = 3;
 typedef UploadProgressCallback =
     void Function(int uploadedChunks, int totalChunks);
 
+class CompletedUpload {
+  const CompletedUpload({
+    required this.uploadId,
+    this.jobId,
+    this.savedName,
+  });
+
+  final String uploadId;
+  final String? jobId;
+  final String? savedName;
+}
+
 class ChunkedUploadService {
   ChunkedUploadService._();
 
   static final ChunkedUploadService instance = ChunkedUploadService._();
 
-  Future<String> uploadFileAndStartJob({
+  Future<CompletedUpload> uploadFile({
     required String filePath,
     required String accessToken,
     required AiPreferences prefs,
@@ -31,6 +43,9 @@ class ChunkedUploadService {
     int? durationSeconds,
     String? existingUploadSessionId,
     int? lastUploadedChunkIndex,
+    bool deferAnalysis = true,
+    String? sourceLanguage,
+    String? outputLanguage,
     UploadProgressCallback? onProgress,
     Future<void> Function(String uploadSessionId, int uploadedChunks)?
     onSessionProgress,
@@ -75,6 +90,9 @@ class ChunkedUploadService {
         availableTags: availableTags,
         noteId: noteId,
         durationSeconds: durationSeconds,
+        deferAnalysis: deferAnalysis,
+        sourceLanguage: sourceLanguage,
+        outputLanguage: outputLanguage,
       );
       await onSessionProgress?.call(uploadId, -1);
       startChunk = 0;
@@ -114,6 +132,9 @@ class ChunkedUploadService {
     required List<String> availableTags,
     String? noteId,
     int? durationSeconds,
+    bool deferAnalysis = true,
+    String? sourceLanguage,
+    String? outputLanguage,
   }) async {
     final url = await ApiUrlResolver.resolveEndpoint('/upload-audio/sessions');
     final body = <String, dynamic>{
@@ -121,8 +142,11 @@ class ChunkedUploadService {
       'total_size': totalSize,
       'total_chunks': totalChunks,
       'ai_model': prefs.model.openRouterId,
-      'language': prefs.transcriptionLanguage.name,
+      'language': prefs.transcriptionLanguage.id,
+      'source_language': sourceLanguage ?? prefs.transcriptionLanguage.id,
+      'output_language': outputLanguage ?? prefs.outputLanguage.id,
       'available_tags': availableTags,
+      'defer_analysis': deferAnalysis,
     };
     if (noteId != null && noteId.isNotEmpty) {
       body['note_id'] = noteId;
@@ -233,7 +257,10 @@ class ChunkedUploadService {
     }
   }
 
-  Future<String> _completeSession(String uploadId, String accessToken) async {
+  Future<CompletedUpload> _completeSession(
+    String uploadId,
+    String accessToken,
+  ) async {
     final url = await ApiUrlResolver.resolveEndpoint(
       '/upload-audio/sessions/$uploadId/complete',
     );
@@ -246,6 +273,49 @@ class ChunkedUploadService {
     if (quotaError != null) throw quotaError;
     if (response.statusCode != 200) {
       throw Exception(_errorDetail(response, 'Completamento upload fallito'));
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return CompletedUpload(
+      uploadId: data['upload_id'] as String? ?? uploadId,
+      jobId: data['job_id'] as String?,
+      savedName: data['saved_name'] as String?,
+    );
+  }
+
+  Future<String> startAnalyze({
+    required String uploadId,
+    required String accessToken,
+    required AiPreferences prefs,
+    required List<String> availableTags,
+    required String sourceLanguage,
+    required String outputLanguage,
+    String? noteId,
+    int? durationSeconds,
+  }) async {
+    final url = await ApiUrlResolver.resolveEndpoint(
+      '/upload-audio/sessions/$uploadId/analyze',
+    );
+    final customPrompt = prefs.customPrompt.trim();
+    final response = await http.post(
+      Uri.parse(url),
+      headers: DropApiHeaders.json(accessToken),
+      body: jsonEncode({
+        if (noteId != null && noteId.isNotEmpty) 'note_id': noteId,
+        'ai_model': prefs.model.openRouterId,
+        'language': sourceLanguage,
+        'source_language': sourceLanguage,
+        'output_language': outputLanguage,
+        if (customPrompt.isNotEmpty) 'custom_prompt': customPrompt,
+        'available_tags': availableTags,
+        if (durationSeconds != null && durationSeconds > 0)
+          'duration_seconds': durationSeconds,
+      }),
+    );
+    _ensureAuthOrThrow(response);
+    final quotaError = ServerQuotaService.parseError(response);
+    if (quotaError != null) throw quotaError;
+    if (response.statusCode != 200) {
+      throw Exception(_errorDetail(response, 'Avvio analisi fallito'));
     }
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final jobId = data['job_id'] as String?;

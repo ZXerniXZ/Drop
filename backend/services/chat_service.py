@@ -6,6 +6,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from config import OPENROUTER_API_KEY
+from services.languages import display_name
 from services.llm_service import (
     APP_REFERER,
     APP_TITLE,
@@ -18,9 +19,9 @@ MAX_HISTORY_MESSAGES = 10
 MAX_TRANSCRIPT_CHARS = 12_000
 HEAD_TAIL_CHARS = 4_000
 
-NOTE_CHAT_SYSTEM_PROMPT = """Sei Drop, assistente AI per una singola nota vocale.
-Rispondi SOLO in base al contesto della nota fornito. Se l'informazione non è nel contesto, dillo chiaramente.
-Rispondi in italiano, in modo conciso e utile. Puoi usare elenchi puntati o markdown leggero."""
+NOTE_CHAT_SYSTEM_PROMPT = """You are Drop, an AI assistant for a single voice note.
+Reply ONLY from the provided note context. If the information is not in the context, say so clearly.
+Reply in {output_language}, concisely and helpfully. Bullet lists or light markdown are fine."""
 
 
 class ChatHistoryMessage(BaseModel):
@@ -45,6 +46,7 @@ class NoteChatRequest(BaseModel):
     note_id: str
     history: list[ChatHistoryMessage] = Field(default_factory=list)
     ai_model: str | None = None
+    output_language: str | None = None
     note_context: NoteContext
 
 
@@ -102,9 +104,11 @@ def _build_note_context_block(ctx: NoteContext) -> str:
 
 def _build_openrouter_messages(request: NoteChatRequest) -> list[dict[str, str]]:
     context_block = _build_note_context_block(request.note_context)
+    language_label = display_name(request.output_language) or "English"
+    system_prompt = NOTE_CHAT_SYSTEM_PROMPT.format(output_language=language_label)
     system_content = (
-        f"{NOTE_CHAT_SYSTEM_PROMPT}\n\n"
-        f"--- CONTESTO NOTA ---\n{context_block}\n--- FINE CONTESTO ---"
+        f"{system_prompt}\n\n"
+        f"--- NOTE CONTEXT ---\n{context_block}\n--- END CONTEXT ---"
     )
 
     messages: list[dict[str, str]] = [{"role": "system", "content": system_content}]

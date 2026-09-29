@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'audio_binary_store.dart';
 
 import '../models/ai_preferences.dart';
+import '../models/app_language.dart';
 import '../models/audio_note.dart';
 import '../models/chat_stream_event.dart';
 import '../models/note_chat_message.dart';
@@ -58,12 +59,32 @@ const _formatMap = {
 };
 
 const _languageCodes = {
+  'automatic': null,
+  'automatico': null,
+  'auto': null,
   'italian': 'it',
   'italiano': 'it',
   'english': 'en',
   'inglese': 'en',
-  'automatic': null,
-  'automatico': null,
+  'spanish': 'es',
+  'espanol': 'es',
+  'french': 'fr',
+  'francais': 'fr',
+  'german': 'de',
+  'deutsch': 'de',
+  'portuguese': 'pt',
+  'portugues': 'pt',
+  'dutch': 'nl',
+  'nederlands': 'nl',
+  'polish': 'pl',
+  'romanian': 'ro',
+  'russian': 'ru',
+  'chinese': 'zh',
+  'japanese': 'ja',
+  'korean': 'ko',
+  'arabic': 'ar',
+  'hindi': 'hi',
+  'turkish': 'tr',
 };
 
 class OpenRouterClient {
@@ -159,14 +180,17 @@ class OpenRouterClient {
       'messages': [
         {
           'role': 'system',
-          'content': buildAnalysisSystemPrompt(pool),
+          'content': buildAnalysisSystemPrompt(
+            pool,
+            outputLanguage: prefs.outputLanguage.id,
+          ),
         },
         {
           'role': 'user',
           'content': buildAnalysisUserPrompt(
             transcript: transcript,
             customPrompt: prefs.customPrompt,
-            language: prefs.transcriptionLanguage.name,
+            language: prefs.outputLanguage.id,
             segments: segments,
           ),
         },
@@ -212,16 +236,23 @@ class OpenRouterClient {
     required String apiKey,
     required AiPreferences prefs,
     required List<String> availableTags,
+    String? sourceLanguage,
+    String? outputLanguage,
   }) async {
     final transcription = await transcribeAudio(
       filePath: filePath,
       apiKey: apiKey,
-      language: prefs.transcriptionLanguage.name,
+      language: sourceLanguage ?? prefs.transcriptionLanguage.id,
+    );
+    final analysisPrefs = prefs.copyWith(
+      outputLanguage: outputLanguage == null
+          ? null
+          : AppLanguage.outputFromKey(outputLanguage),
     );
     final processed = await analyzeTranscript(
       transcript: transcription,
       apiKey: apiKey,
-      prefs: prefs,
+      prefs: analysisPrefs,
       availableTags: availableTags,
     );
 
@@ -314,10 +345,11 @@ class OpenRouterClient {
     required String message,
     required List<NoteChatMessage> history,
     required Map<String, dynamic> noteContext,
+    String? outputLanguage,
   }) {
     final contextBlock = _buildNoteContextBlock(noteContext);
     final systemContent =
-        '$noteChatSystemPrompt\n\n--- CONTESTO NOTA ---\n$contextBlock\n--- FINE CONTESTO ---';
+        '${buildNoteChatSystemPrompt(outputLanguage: outputLanguage)}\n\n--- NOTE CONTEXT ---\n$contextBlock\n--- END CONTEXT ---';
 
     final messages = <Map<String, String>>[
       {'role': 'system', 'content': systemContent},
@@ -368,6 +400,7 @@ class OpenRouterClient {
       message: message,
       history: history,
       noteContext: noteContext,
+      outputLanguage: note.outputLanguage,
     );
 
     final payload = {

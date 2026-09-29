@@ -1,9 +1,8 @@
 import asyncio
 import uuid
 from datetime import datetime, timezone
-from typing import Any
-
 from pathlib import Path
+from typing import Any
 
 from database import SessionLocal
 from models.job import JobDB
@@ -115,6 +114,8 @@ def _save_note_to_db(
     note_id: str | None = None,
     transcript_segments: list[dict[str, Any]] | None = None,
     audio_duration: float | None = None,
+    source_language: str | None = None,
+    output_language: str | None = None,
 ) -> str:
     resolved_id = (note_id or "").strip() or str(uuid.uuid4())
     segments = transcript_segments or []
@@ -134,6 +135,10 @@ def _save_note_to_db(
             existing.transcript_segments = segments
             existing.audio_duration = audio_duration
             existing.audio_filename = saved_name
+            if source_language:
+                existing.source_language = source_language
+            if output_language:
+                existing.output_language = output_language
             db.add(existing)
             db.commit()
             return resolved_id
@@ -151,6 +156,8 @@ def _save_note_to_db(
             transcript_segments=segments,
             audio_duration=audio_duration,
             audio_filename=saved_name,
+            source_language=source_language,
+            output_language=output_language,
         )
         db.add(note)
         db.commit()
@@ -174,8 +181,12 @@ async def run_upload_job(
     custom_prompt: str | None,
     available_tags: list[str] | None,
     estimated_seconds: float | None = None,
+    source_language: str | None = None,
+    output_language: str | None = None,
 ) -> None:
     billed_seconds = 0.0
+    whisper_language = source_language or language
+    analysis_language = output_language or language
     try:
         probed = probe_duration_seconds(Path(file_path))
         to_bill = probed if probed and probed > 0 else estimated_seconds
@@ -192,7 +203,7 @@ async def run_upload_job(
 
         verbose = await transcribe_audio_long_verbose(
             file_path,
-            language=language,
+            language=whisper_language,
             on_progress=on_transcribe_progress,
         )
         transcription = verbose["text"]
@@ -204,7 +215,7 @@ async def run_upload_job(
             transcription,
             model=ai_model,
             custom_prompt=custom_prompt,
-            language=language,
+            language=analysis_language,
             available_tags=available_tags,
             segments=transcript_segments,
         )
@@ -216,6 +227,8 @@ async def run_upload_job(
             note_id=note_id,
             transcript_segments=transcript_segments,
             audio_duration=audio_duration,
+            source_language=whisper_language,
+            output_language=analysis_language,
         )
         result = {
             "success": True,
@@ -230,6 +243,8 @@ async def run_upload_job(
             "speaker_view": processed["speaker_view"],
             "transcript_segments": transcript_segments,
             "audio_duration": audio_duration,
+            "source_language": whisper_language,
+            "output_language": analysis_language,
         }
         _update_job(
             job_id,
@@ -275,6 +290,8 @@ def start_upload_job(
     custom_prompt: str | None,
     available_tags: list[str] | None,
     estimated_seconds: float | None = None,
+    source_language: str | None = None,
+    output_language: str | None = None,
 ) -> None:
     create_job(job_id, user_id=user_id)
     asyncio.create_task(
@@ -289,5 +306,7 @@ def start_upload_job(
             custom_prompt=custom_prompt,
             available_tags=available_tags,
             estimated_seconds=estimated_seconds,
+            source_language=source_language,
+            output_language=output_language,
         )
     )

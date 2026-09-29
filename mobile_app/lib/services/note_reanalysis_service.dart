@@ -20,6 +20,8 @@ class NoteReanalysisService {
     required String noteId,
     required AiPreferences prefs,
     required List<String> availableTags,
+    String? sourceLanguage,
+    String? outputLanguage,
   }) async {
     final token = SupabaseAuthService.instance.currentAccessToken;
     if (token == null || token.isEmpty) {
@@ -36,7 +38,10 @@ class NoteReanalysisService {
       headers: DropApiHeaders.json(token),
       body: jsonEncode({
         'ai_model': prefs.model.openRouterId,
-        'language': prefs.transcriptionLanguage.name,
+        'language': sourceLanguage ?? prefs.transcriptionLanguage.id,
+        'source_language':
+            sourceLanguage ?? prefs.transcriptionLanguage.id,
+        'output_language': outputLanguage ?? prefs.outputLanguage.id,
         if (customPrompt.isNotEmpty) 'custom_prompt': customPrompt,
         'available_tags': availableTags,
       }),

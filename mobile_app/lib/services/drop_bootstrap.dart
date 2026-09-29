@@ -9,6 +9,7 @@ import '../utils/init_sqflite.dart';
 import 'app_preferences_service.dart';
 import 'local_database_service.dart';
 import 'recording_foreground_service.dart';
+import 'share_link.dart';
 
 Future<T> _awaitOrTimeout<T>(
   Future<T> future,
@@ -24,6 +25,7 @@ Future<T> _awaitOrTimeout<T>(
 }
 
 Future<void> bootstrapDrop() async {
+  final shareToken = ShareLink.fromCurrentUri();
   await _awaitOrTimeout(initSqflite(), const Duration(seconds: 12), 'sqlite');
   await _awaitOrTimeout(
     RecordingForegroundService.init(),
@@ -69,4 +71,7 @@ Future<void> bootstrapDrop() async {
     const Duration(seconds: 5),
     'prefs',
   );
+  if (shareToken != null) {
+    await AppPreferencesService.instance.savePendingShareToken(shareToken);
+  }
 }

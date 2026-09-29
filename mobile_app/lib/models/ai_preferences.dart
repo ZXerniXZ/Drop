@@ -1,23 +1,29 @@
+import 'app_language.dart';
+
 class AiPreferences {
   const AiPreferences({
     this.model = AiModel.gemini36Flash,
-    this.transcriptionLanguage = TranscriptionLanguage.automatic,
+    this.transcriptionLanguage = AppLanguage.automatic,
+    this.outputLanguage = AppLanguage.italian,
     this.customPrompt = '',
   });
 
   final AiModel model;
-  final TranscriptionLanguage transcriptionLanguage;
+  final AppLanguage transcriptionLanguage;
+  final AppLanguage outputLanguage;
   final String customPrompt;
 
   AiPreferences copyWith({
     AiModel? model,
-    TranscriptionLanguage? transcriptionLanguage,
+    AppLanguage? transcriptionLanguage,
+    AppLanguage? outputLanguage,
     String? customPrompt,
   }) {
     return AiPreferences(
       model: model ?? this.model,
       transcriptionLanguage:
           transcriptionLanguage ?? this.transcriptionLanguage,
+      outputLanguage: outputLanguage ?? this.outputLanguage,
       customPrompt: customPrompt ?? this.customPrompt,
     );
   }
@@ -41,18 +47,5 @@ enum AiModel {
   }
 }
 
-enum TranscriptionLanguage {
-  automatic('Automatico'),
-  italian('Italiano'),
-  english('Inglese');
-
-  const TranscriptionLanguage(this.label);
-  final String label;
-
-  static TranscriptionLanguage fromKey(String? key) {
-    return TranscriptionLanguage.values.firstWhere(
-      (l) => l.name == key,
-      orElse: () => TranscriptionLanguage.automatic,
-    );
-  }
-}
+/// Compatibilita' con chiavi vecchie nelle preferenze.
+typedef TranscriptionLanguage = AppLanguage;

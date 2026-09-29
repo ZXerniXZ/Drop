@@ -5,20 +5,12 @@ from pathlib import Path
 import httpx
 
 from config import OPENROUTER_API_KEY, TRANSCRIPTION_TIMEOUT_SECONDS
+from services.languages import whisper_code
 
 OPENROUTER_TRANSCRIPTIONS_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
 WHISPER_MODEL = "openai/whisper-large-v3"
 APP_REFERER = "https://github.com/ZXerniXZ/Drop"
 APP_TITLE = "Drop"
-
-LANGUAGE_CODES = {
-    "italian": "it",
-    "italiano": "it",
-    "english": "en",
-    "inglese": "en",
-    "automatic": None,
-    "automatico": None,
-}
 
 _FORMAT_MAP = {
     ".m4a": "m4a",
@@ -60,11 +52,9 @@ def _build_transcription_payload(
         payload["response_format"] = "verbose_json"
         payload["timestamp_granularities"] = ["segment", "word"]
 
-    if language:
-        lang_key = language.strip().lower()
-        lang_code = LANGUAGE_CODES.get(lang_key, lang_key if len(lang_key) == 2 else None)
-        if lang_code:
-            payload["language"] = lang_code
+    lang_code = whisper_code(language)
+    if lang_code:
+        payload["language"] = lang_code
 
     return headers, payload
 
@@ -116,6 +106,7 @@ async def transcribe_audio_verbose(
     return {
         "text": data["text"],
         "duration": data.get("duration"),
+        "language": data.get("language"),
         "segments": data.get("segments") or [],
         "words": data.get("words") or [],
     }
