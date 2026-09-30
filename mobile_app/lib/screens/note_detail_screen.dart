@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../data/note_detail_mock_data.dart';
 import '../models/audio_note.dart';
 import '../models/note_structured_data.dart';
 import '../services/app_preferences_service.dart';
@@ -574,9 +573,7 @@ class _HighlightsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final items = highlights.isNotEmpty
-        ? highlights
-        : NoteDetailMockData.actionItems.map((e) => e.text).toList();
+    final items = highlights;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -670,9 +667,7 @@ class _SummaryTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final summaryText = note.summary.isNotEmpty
-        ? note.summary
-        : NoteDetailMockData.summaryParagraphs(null).join('\n\n');
+    final summaryText = note.summary.trim();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -700,10 +695,20 @@ class _SummaryTab extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 16),
-        DropMarkdown(data: summaryText),
+        if (summaryText.isEmpty)
+          Text(
+            'Nessun riassunto.',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: DropColors.muted(context),
+                ),
+          )
+        else
+          DropMarkdown(data: summaryText),
         const SizedBox(height: 8),
         OutlinedButton.icon(
-          onPressed: () async {
+          onPressed: summaryText.isEmpty
+              ? null
+              : () async {
             await Clipboard.setData(ClipboardData(text: summaryText));
             if (!context.mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
@@ -733,17 +738,7 @@ class _SpeakerViewTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final displayBlocks = blocks.isNotEmpty
-        ? blocks
-        : NoteDetailMockData.speakerBlocks
-            .map(
-              (b) => SpeakerBlock(
-                speaker: b.speaker,
-                text: b.text,
-                time: b.time,
-              ),
-            )
-            .toList();
+    final displayBlocks = blocks;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -851,12 +846,10 @@ class _KeyDataTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final displayLocation =
-        location.isNotEmpty ? location : NoteDetailMockData.location;
-    final displayAttendees = participants.isNotEmpty
-        ? participants.join(', ')
-        : NoteDetailMockData.attendees;
-    final displayTag = tag.isNotEmpty ? tag : 'Diario';
+    final displayLocation = location.isNotEmpty ? location : '—';
+    final displayAttendees =
+        participants.isNotEmpty ? participants.join(', ') : '—';
+    final displayTag = tag.isNotEmpty ? tag : '—';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

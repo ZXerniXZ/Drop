@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:record/record.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -40,6 +41,7 @@ import '../widgets/note_filter_bar.dart';
 import '../widgets/drop_bottom_nav.dart';
 import '../widgets/drop_logo.dart';
 import '../widgets/note_list_card.dart';
+import '../widgets/note_swipe_actions.dart';
 import '../widgets/staggered_entrance.dart';
 import 'note_detail_screen.dart';
 import 'update_required_screen.dart';
@@ -731,6 +733,106 @@ class _RecorderScreenState extends State<RecorderScreen>
     }
   }
 
+  Future<bool> _confirmDeleteNote(AudioNote note) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Elimina nota'),
+        content: Text('Vuoi eliminare "${note.title}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Annulla'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(
+              'Elimina',
+              style: TextStyle(color: DropColors.recordRed),
+            ),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
+  }
+
+  Future<void> _shareListedNote(AudioNote note) async {
+    final navigator = Navigator.of(context);
+    final loader = DialogRoute<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(strokeWidth: 2),
+      ),
+    );
+    navigator.push(loader);
+    try {
+      final prefs = await AppPreferencesService.instance.loadAiPreferences();
+      final url = await NoteShareService.instance.createShareUrl(
+        note,
+        prefs: prefs,
+      );
+      if (loader.isActive) navigator.removeRoute(loader);
+      if (!mounted) return;
+      final action = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Condividi nota'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Chi apre il link accede a Drop e riceve una copia della nota nella propria libreria.',
+              ),
+              const SizedBox(height: 12),
+              SelectableText(
+                url,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await NoteShareService.instance.revokeShare(note.id);
+                if (context.mounted) Navigator.pop(context, 'revoked');
+              },
+              child: const Text(
+                'Revoca',
+                style: TextStyle(color: DropColors.recordRed),
+              ),
+            ),
+            TextButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: url));
+                if (context.mounted) Navigator.pop(context, 'copied');
+              },
+              child: const Text('Copia link'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (action == 'copied') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Link copiato')),
+        );
+      } else if (action == 'revoked') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Link revocato')),
+        );
+      }
+    } catch (e) {
+      if (loader.isActive) navigator.removeRoute(loader);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e')),
+      );
+    }
+  }
+
   Future<void> _deleteNote(AudioNote note) async {
     await LocalDatabaseService.instance.deleteNote(note.id);
     try {
@@ -1028,6 +1130,67 @@ class _RecorderScreenState extends State<RecorderScreen>
     );
   }
 
+  /// Rifà l'analisi con la chiave OpenRouter dell'utente, senza il piano Drop.
+  Future<void> _reanalyzeWithPersonalKey({
+    required AudioNote note,
+    required AudioNote processing,
+    required String apiKey,
+    required AiPreferences prefs,
+    required List<String> availableTags,
+    required String sourceLanguage,
+    required String outputLanguage,
+  }) async {
+    var path = note.audioPath;
+    final hadLocalAudio =
+        path.isNotEmpty && await AudioBinaryStore.instance.exists(path);
+    if (!hadLocalAudio) {
+      final downloaded = await NoteAudioService.instance.ensureLocalAudio(
+        note.id,
+        currentPath: path,
+      );
+      if (downloaded == null || downloaded.isEmpty) {
+        throw Exception('Audio non disponibile per rifare l\'analisi.');
+      }
+      path = downloaded;
+    }
+
+    final result = await OpenRouterClient.instance.processAudioFile(
+      filePath: path,
+      apiKey: apiKey,
+      prefs: prefs,
+      availableTags: availableTags,
+      sourceLanguage: sourceLanguage,
+      outputLanguage: outputLanguage,
+    );
+    final updated = _noteFromResponse(
+      result,
+      placeholder: processing,
+      audioPath: path,
+    ).copyWith(
+      sourceLanguage: sourceLanguage,
+      outputLanguage: outputLanguage,
+    );
+    await LocalDatabaseService.instance.saveNote(updated);
+    if (!mounted) return;
+    _updateNoteInList(updated);
+
+    try {
+      await NoteShareService.instance.publishNote(
+        updated,
+        prefs: prefs,
+        uploadAudio: hadLocalAudio,
+      );
+    } catch (_) {}
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Analisi rifatta'),
+        backgroundColor: Colors.green,
+      ),
+    );
+  }
+
   /// Ri-trascrive e rianalizza una nota gia' completata usando l'audio che il
   /// backend conserva. In caso di errore la nota precedente viene ripristinata:
   /// il contenuto vecchio resta valido finche' il nuovo non arriva.
@@ -1076,6 +1239,20 @@ class _RecorderScreenState extends State<RecorderScreen>
     _updateNoteInList(processing);
 
     try {
+      final apiKey = await AppPreferencesService.instance.loadOpenRouterApiKey();
+      if (apiKey != null && apiKey.isNotEmpty) {
+        await _reanalyzeWithPersonalKey(
+          note: note,
+          processing: processing,
+          apiKey: apiKey,
+          prefs: analysisPrefs,
+          availableTags: tagsConfig.tags,
+          sourceLanguage: choice.sourceLanguage.id,
+          outputLanguage: choice.outputLanguage.id,
+        );
+        return;
+      }
+
       final jobId = await NoteReanalysisService.instance.requestReanalysis(
         noteId: note.id,
         prefs: analysisPrefs,
@@ -1358,12 +1535,18 @@ class _RecorderScreenState extends State<RecorderScreen>
         final note = _filteredNotes[index];
         return StaggeredEntrance(
           index: index,
-          child: NoteListCard(
-            note: note,
-            dateLabel: _formatNoteDate(note.dateTime),
-            onTap: note.isProcessing ? null : () => _openNoteDetail(note),
+          child: NoteSwipeActions(
+            enabled: !note.isProcessing,
+            onShare: () => _shareListedNote(note),
             onDelete: () => _deleteNote(note),
-            onRetry: note.isFailed ? () => _retryAnalysis(note) : null,
+            confirmDelete: () => _confirmDeleteNote(note),
+            child: NoteListCard(
+              note: note,
+              dateLabel: _formatNoteDate(note.dateTime),
+              onTap: note.isProcessing ? null : () => _openNoteDetail(note),
+              onDelete: () => _deleteNote(note),
+              onRetry: note.isFailed ? () => _retryAnalysis(note) : null,
+            ),
           ),
         );
       },
