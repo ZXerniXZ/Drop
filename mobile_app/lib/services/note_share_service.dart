@@ -46,11 +46,13 @@ class NoteShareService {
     AudioNote note, {
     String? uploadId,
     AiPreferences? prefs,
+    bool uploadAudio = true,
   }) async {
     final accessToken = await _requireToken();
     var resolvedUploadId = uploadId;
 
-    if ((resolvedUploadId == null || resolvedUploadId.isEmpty) &&
+    if (uploadAudio &&
+        (resolvedUploadId == null || resolvedUploadId.isEmpty) &&
         note.audioPath.isNotEmpty &&
         await AudioBinaryStore.instance.exists(note.audioPath)) {
       final completed = await ChunkedUploadService.instance.uploadFile(
@@ -110,9 +112,12 @@ class NoteShareService {
 
   Future<String> createShareUrl(AudioNote note, {AiPreferences? prefs}) async {
     final accessToken = await _requireToken();
-    if (!await _noteExistsOnServer(note.id, accessToken)) {
-      await publishNote(note, prefs: prefs);
-    }
+    final alreadyOnServer = await _noteExistsOnServer(note.id, accessToken);
+    await publishNote(
+      note,
+      prefs: prefs,
+      uploadAudio: !alreadyOnServer,
+    );
 
     final url = await ApiUrlResolver.resolveEndpoint('/notes/${note.id}/share');
     final response = await http.post(

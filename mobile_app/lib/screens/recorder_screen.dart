@@ -605,16 +605,6 @@ class _RecorderScreenState extends State<RecorderScreen>
           sourceLanguage: choice.sourceLanguage.id,
           outputLanguage: choice.outputLanguage.id,
         );
-        final latestIndex = _notes.indexWhere((n) => n.id == noteId);
-        final latest = latestIndex == -1 ? placeholder : _notes[latestIndex];
-        await NoteShareService.instance.publishNote(
-          latest.copyWith(
-            sourceLanguage: choice.sourceLanguage.id,
-            outputLanguage: choice.outputLanguage.id,
-          ),
-          uploadId: uploaded.uploadId,
-          prefs: analysisPrefs,
-        );
       } else {
         final quota = await ServerQuotaService.instance.fetch();
         if (quota != null &&
@@ -671,6 +661,14 @@ class _RecorderScreenState extends State<RecorderScreen>
         sourceLanguage: choice.sourceLanguage.id,
         outputLanguage: choice.outputLanguage.id,
       );
+
+      if (apiKey != null && apiKey.isNotEmpty) {
+        await NoteShareService.instance.publishNote(
+          note,
+          uploadId: uploaded.uploadId,
+          prefs: analysisPrefs,
+        );
+      }
 
       await LocalDatabaseService.instance.saveNote(note);
       if (!mounted) return;
