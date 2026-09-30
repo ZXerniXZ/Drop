@@ -241,8 +241,10 @@ async def process_transcript(
     language: str | None = None,
     available_tags: list[str] | None = None,
     segments: list[dict[str, Any]] | None = None,
+    api_key: str | None = None,
 ) -> dict[str, Any]:
-    if not OPENROUTER_API_KEY:
+    resolved_key = (api_key or "").strip() or OPENROUTER_API_KEY
+    if not resolved_key:
         raise ValueError("OPENROUTER_API_KEY is not configured")
 
     resolved_model = resolve_llm_model(model)
@@ -259,7 +261,7 @@ async def process_transcript(
         )
 
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Authorization": f"Bearer {resolved_key}",
         "Content-Type": "application/json",
         "HTTP-Referer": APP_REFERER,
         "X-Title": APP_TITLE,

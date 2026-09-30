@@ -7,10 +7,14 @@ from pathlib import Path
 from typing import Any
 
 from config import SEGMENT_TARGET_SECONDS
-from services.openrouter_service import transcribe_audio_verbose
+from services.openrouter_service import (
+    MAX_TRANSCRIPTION_FILE_BYTES,
+    transcribe_audio_verbose,
+)
 
-WHISPER_MAX_BYTES = 24 * 1024 * 1024
-SEGMENT_TARGET_BYTES = 20 * 1024 * 1024
+# Spezzoni ricodificati a 64 kbps restano ampiamente sotto il tetto OpenRouter.
+# Il tetto sui byte originali serve per wav/m4a densi prima della ricodifica.
+SEGMENT_TARGET_BYTES = 12 * 1024 * 1024
 
 
 async def transcribe_audio_long(
@@ -18,9 +22,10 @@ async def transcribe_audio_long(
     language: str | None = None,
     *,
     on_progress: Callable[[int, int], None] | None = None,
+    api_key: str | None = None,
 ) -> str:
     result = await transcribe_audio_long_verbose(
-        file_path, language, on_progress=on_progress
+        file_path, language, on_progress=on_progress, api_key=api_key
     )
     return result["text"]
 
@@ -30,27 +35,29 @@ async def transcribe_audio_long_verbose(
     language: str | None = None,
     *,
     on_progress: Callable[[int, int], None] | None = None,
+    api_key: str | None = None,
 ) -> dict[str, Any]:
     """Trascrive l'audio restituendo testo e timestamp assoluti.
 
-    Gli spezzoni servono sia a rispettare il limite di Whisper sia a dare un
-    avanzamento misurabile: i timestamp di ogni spezzone vengono traslati con
-    la durata reale degli spezzoni precedenti, non con quella richiesta a
-    ffmpeg, che si allinea ai keyframe e quindi varia.
+    Gli spezzoni servono sia a rispettare il limite di OpenRouter sia a dare un
+    avanzamento misurabile. ffmpeg ricodifica (non copia) così i tagli non
+    dipendono dai keyframe e il bitrate resta basso.
     """
     path = Path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"Audio file not found: {file_path}")
 
     total_duration = probe_duration_seconds(path)
-    needs_split = path.stat().st_size > WHISPER_MAX_BYTES or (
+    needs_split = path.stat().st_size > MAX_TRANSCRIPTION_FILE_BYTES or (
         total_duration is not None and total_duration > SEGMENT_TARGET_SECONDS
     )
 
     if not needs_split:
         if on_progress:
             on_progress(1, 1)
-        verbose = await transcribe_audio_verbose(file_path, language=language)
+        verbose = await transcribe_audio_verbose(
+            file_path, language=language, api_key=api_key
+        )
         return {
             "text": verbose["text"],
             "duration": verbose.get("duration") or total_duration,
@@ -71,7 +78,7 @@ async def transcribe_audio_long_verbose(
                 on_progress(index + 1, total)
 
             verbose = await transcribe_audio_verbose(
-                str(segment_path), language=language
+                str(segment_path), language=language, api_key=api_key
             )
             text = verbose["text"].strip()
             if text:
@@ -164,11 +171,12 @@ def _split_audio_file(
     path: Path, total_duration: float | None = None
 ) -> list[Path]:
     file_size = path.stat().st_size
-    duration = total_duration if total_duration is not None else probe_duration_seconds(path)
+    duration = (
+        total_duration if total_duration is not None else probe_duration_seconds(path)
+    )
 
     chunk_duration = float(SEGMENT_TARGET_SECONDS)
     if duration and duration > 0:
-        # Se il file e' molto denso, il limite di byte e' piu' stringente del tempo.
         byte_based_count = max(
             1, (file_size + SEGMENT_TARGET_BYTES - 1) // SEGMENT_TARGET_BYTES
         )
@@ -183,12 +191,20 @@ def _split_audio_file(
         "error",
         "-i",
         str(path),
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "64k",
         "-f",
         "segment",
         "-segment_time",
         str(chunk_duration),
-        "-c",
-        "copy",
+        "-reset_timestamps",
+        "1",
         str(pattern),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -203,11 +219,11 @@ def _split_audio_file(
         shutil.rmtree(tmp_dir, ignore_errors=True)
         raise RuntimeError("ffmpeg produced no segments")
 
-    oversized = [s for s in segments if s.stat().st_size > WHISPER_MAX_BYTES]
+    oversized = [s for s in segments if s.stat().st_size > MAX_TRANSCRIPTION_FILE_BYTES]
     if oversized:
         shutil.rmtree(tmp_dir, ignore_errors=True)
         raise RuntimeError(
-            "A segment still exceeds Whisper limit; reduce SEGMENT_TARGET_SECONDS"
+            "A segment still exceeds OpenRouter limit; reduce SEGMENT_TARGET_SECONDS"
         )
     return segments
 

@@ -204,4 +204,9 @@ class LocalDatabaseService {
       whereArgs: [noteId],
     );
   }
+
+  Future<void> deleteAllUserData() async {
+    await _database.delete('note_chat_messages');
+    await _database.delete('audio_notes');
+  }
 }

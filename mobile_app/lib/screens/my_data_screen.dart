@@ -4,8 +4,12 @@ import '../config/api_config.dart';
 import '../models/ai_preferences.dart';
 import '../models/app_language.dart';
 import '../models/note_tags_config.dart';
+import '../services/account_data_service.dart';
 import '../services/app_preferences_service.dart';
+import '../services/audio_binary_store.dart';
 import '../services/audio_storage_service.dart';
+import '../services/legal_links.dart';
+import '../services/local_database_service.dart';
 import '../services/openrouter_client.dart';
 import '../services/server_health_service.dart';
 import '../services/server_quota_service.dart';
@@ -13,6 +17,7 @@ import '../services/supabase_auth_service.dart';
 import '../theme/drop_motion.dart';
 import '../theme/drop_theme.dart';
 import 'record_orb_preview_screen.dart';
+import 'tutorial_screen.dart';
 
 class MyDataScreen extends StatefulWidget {
   const MyDataScreen({super.key});
@@ -29,6 +34,8 @@ class _MyDataScreenState extends State<MyDataScreen> {
   ServerStatus _serverStatus = ServerStatus.checking;
   bool _isLoading = true;
   bool _isClearing = false;
+  bool _isExporting = false;
+  bool _isDeletingAccount = false;
   bool _hasCustomApiKey = false;
   bool _isTestingApiKey = false;
   bool _obscureApiKey = true;
@@ -180,9 +187,132 @@ class _MyDataScreenState extends State<MyDataScreen> {
     );
   }
 
-  void _exportBackup() {
+  Future<void> _exportBackup() async {
+    if (_isExporting) return;
+    setState(() => _isExporting = true);
+    try {
+      await AccountDataService.instance.downloadExport();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Copia dei dati pronta')),
+      );
+    } on AccountDataException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.message),
+          backgroundColor: DropColors.recordRed,
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Download non riuscito'),
+          backgroundColor: DropColors.recordRed,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isExporting = false);
+    }
+  }
+
+  Future<void> _deleteAccount() async {
+    if (_isDeletingAccount) return;
+    final email = SupabaseAuthService.instance.currentUser?.email?.trim() ?? '';
+    if (email.isEmpty) return;
+
+    final controller = TextEditingController();
+    var matches = false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) {
+          return AlertDialog(
+            title: const Text('Elimina account'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Note, audio, trascrizioni e l’accesso vengono cancellati. '
+                  'Non si può annullare.',
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: controller,
+                  keyboardType: TextInputType.emailAddress,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Scrivi la tua email per confermare',
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: (value) {
+                    setLocal(() {
+                      matches = value.trim().toLowerCase() == email.toLowerCase();
+                    });
+                  },
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Annulla'),
+              ),
+              TextButton(
+                onPressed: matches ? () => Navigator.pop(context, true) : null,
+                child: const Text(
+                  'Elimina',
+                  style: TextStyle(color: DropColors.recordRed),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    controller.dispose();
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isDeletingAccount = true);
+    try {
+      await AccountDataService.instance.deleteAccount();
+      final notes = await LocalDatabaseService.instance.getAllNotes();
+      for (final note in notes) {
+        if (note.audioPath.isNotEmpty) {
+          await AudioBinaryStore.instance.delete(note.audioPath);
+        }
+      }
+      await AudioStorageService.clearAudioCache();
+      await LocalDatabaseService.instance.deleteAllUserData();
+      await SupabaseAuthService.instance.signOut();
+    } on AccountDataException catch (error) {
+      if (!mounted) return;
+      setState(() => _isDeletingAccount = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.message),
+          backgroundColor: DropColors.recordRed,
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isDeletingAccount = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cancellazione non riuscita'),
+          backgroundColor: DropColors.recordRed,
+        ),
+      );
+    }
+  }
+
+  Future<void> _openLegal(String url) async {
+    final opened = await LegalLinks.open(url);
+    if (opened || !mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Esporta backup JSON — in arrivo')),
+      const SnackBar(content: Text('Non riesco ad aprire la pagina')),
     );
   }
 
@@ -220,6 +350,22 @@ class _MyDataScreenState extends State<MyDataScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
         children: [
+          const _SettingsSectionLabel('Guida'),
+          const SizedBox(height: 8),
+          _SettingsGroup(
+            children: [
+              _SettingsActionRow(
+                label: 'Rivedi il tutorial',
+                icon: Icons.menu_book_outlined,
+                onTap: () {
+                  Navigator.of(context).push(
+                    DropPageRoute<void>(page: const TutorialScreen()),
+                  );
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 28),
           const _SettingsSectionLabel('Account'),
           const SizedBox(height: 8),
           _SettingsGroup(
@@ -230,7 +376,32 @@ class _MyDataScreenState extends State<MyDataScreen> {
                 label: 'Esci',
                 icon: Icons.logout,
                 isDestructive: true,
-                onTap: _signOut,
+                onTap: _isDeletingAccount ? () {} : _signOut,
+              ),
+              _GroupDivider(),
+              _SettingsActionRow(
+                label: _isDeletingAccount ? 'Eliminazione…' : 'Elimina account',
+                icon: Icons.delete_forever_outlined,
+                isDestructive: true,
+                onTap: _isDeletingAccount ? () {} : _deleteAccount,
+              ),
+            ],
+          ),
+          const SizedBox(height: 28),
+          const _SettingsSectionLabel('Legale'),
+          const SizedBox(height: 8),
+          _SettingsGroup(
+            children: [
+              _SettingsActionRow(
+                label: 'Informativa privacy',
+                icon: Icons.privacy_tip_outlined,
+                onTap: () => _openLegal(LegalLinks.privacy),
+              ),
+              _GroupDivider(),
+              _SettingsActionRow(
+                label: 'Condizioni d’uso',
+                icon: Icons.article_outlined,
+                onTap: () => _openLegal(LegalLinks.terms),
               ),
             ],
           ),
@@ -297,6 +468,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
               _StorageSection(
                 storage: _storage!,
                 isClearing: _isClearing,
+                isExporting: _isExporting,
                 onClearCache: _clearCache,
                 onExportBackup: _exportBackup,
               ),
@@ -828,12 +1000,14 @@ class _StorageSection extends StatelessWidget {
   const _StorageSection({
     required this.storage,
     required this.isClearing,
+    required this.isExporting,
     required this.onClearCache,
     required this.onExportBackup,
   });
 
   final AudioStorageInfo storage;
   final bool isClearing;
+  final bool isExporting;
   final VoidCallback onClearCache;
   final VoidCallback onExportBackup;
 
@@ -891,9 +1065,15 @@ class _StorageSection extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
-            onPressed: onExportBackup,
-            icon: const Icon(Icons.download_outlined, size: 16),
-            label: const Text('Esporta backup JSON'),
+            onPressed: isExporting ? null : onExportBackup,
+            icon: isExporting
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.download_outlined, size: 16),
+            label: const Text('Scarica i miei dati'),
             style: OutlinedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 12),
               side: BorderSide(color: DropColors.border(context)),

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'screens/accept_terms_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/recorder_screen.dart';
 import 'services/drop_bootstrap.dart';
+import 'services/legal_acceptance.dart';
 import 'services/supabase_auth_service.dart';
 import 'theme/drop_motion.dart';
 import 'theme/drop_theme.dart';
@@ -58,6 +60,9 @@ class _DropAppState extends State<DropApp> {
           final confirmed = session?.user.emailConfirmedAt != null;
           if (session == null || !confirmed) {
             return const LoginScreen();
+          }
+          if (!LegalAcceptance.hasAcceptedCurrentTerms) {
+            return const AcceptTermsScreen();
           }
           return RecorderScreen(
             isDarkMode: _themeMode == ThemeMode.dark,

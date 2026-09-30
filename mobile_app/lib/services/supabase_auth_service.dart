@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/supabase_config.dart';
 import 'drop_api_headers.dart';
+import 'legal_acceptance.dart';
 
 class SupabaseAuthService {
   SupabaseAuthService._();
@@ -42,6 +43,7 @@ class SupabaseAuthService {
       email: email,
       password: password,
       emailRedirectTo: SupabaseConfig.oauthRedirectUri,
+      data: LegalAcceptance.termsPayload(),
     );
   }
 

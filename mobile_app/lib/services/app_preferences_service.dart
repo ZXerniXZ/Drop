@@ -23,6 +23,7 @@ class AppPreferencesService {
   static const _iosInstallBannerDismissedKey = 'ios_install_banner_dismissed';
   static const _webGetAppBannerDismissedKey = 'web_get_app_banner_dismissed';
   static const _pendingShareKey = 'pending_share_token';
+  static const _tutorialSeenKey = 'tutorial_seen';
 
   static const _secureStorage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
@@ -176,5 +177,15 @@ class AppPreferencesService {
     final token = await loadPendingShareToken();
     await _store.remove(_pendingShareKey);
     return token;
+  }
+
+  Future<bool> hasSeenTutorial() async {
+    await init();
+    return _store.getBool(_tutorialSeenKey) ?? false;
+  }
+
+  Future<void> setTutorialSeen() async {
+    await init();
+    await _store.setBool(_tutorialSeenKey, true);
   }
 }

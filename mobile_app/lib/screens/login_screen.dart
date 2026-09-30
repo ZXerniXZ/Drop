@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/supabase_auth_service.dart';
 import '../theme/drop_theme.dart';
 import '../widgets/drop_logo.dart';
+import '../widgets/legal_consent.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -19,6 +20,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isSignUp = false;
   bool _isLoading = false;
   bool _obscurePassword = true;
+  bool _acceptedTerms = false;
 
   @override
   void dispose() {
@@ -63,7 +65,10 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  bool get _signupBlocked => _isSignUp && !_acceptedTerms;
+
   Future<void> _submitEmailPassword() async {
+    if (_signupBlocked) return;
     final email = _emailController.text.trim();
     final password = _passwordController.text;
     if (email.isEmpty || password.isEmpty) {
@@ -153,7 +158,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 20),
                   FilledButton(
-                    onPressed: _isLoading ? null : _submitEmailPassword,
+                    onPressed: _isLoading || _signupBlocked
+                        ? null
+                        : _submitEmailPassword,
                     style: FilledButton.styleFrom(
                       minimumSize: const Size.fromHeight(48),
                     ),
@@ -166,6 +173,13 @@ class _LoginScreenState extends State<LoginScreen> {
                         : Text(_isSignUp ? 'Registrati' : 'Accedi'),
                   ),
                   const SizedBox(height: 16),
+                  LegalConsent(
+                    requireCheckbox: _isSignUp,
+                    accepted: _acceptedTerms,
+                    onChanged: (value) =>
+                        setState(() => _acceptedTerms = value),
+                  ),
+                  const SizedBox(height: 8),
                   TextButton(
                     onPressed: _isLoading
                         ? null
@@ -192,7 +206,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 16),
                   OutlinedButton.icon(
-                    onPressed: _isLoading
+                    onPressed: _isLoading || _signupBlocked
                         ? null
                         : () => _runAuth(
                               SupabaseAuthService.instance.signInWithGoogle,
@@ -205,7 +219,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 10),
                   OutlinedButton.icon(
-                    onPressed: _isLoading
+                    onPressed: _isLoading || _signupBlocked
                         ? null
                         : () => _runAuth(
                               SupabaseAuthService.instance.signInWithGitHub,

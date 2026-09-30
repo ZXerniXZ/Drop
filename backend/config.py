@@ -52,6 +52,9 @@ SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "") or os.getenv(
     "JWT_SECRET", ""
 )
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://auth.drop-prj.xyz").rstrip("/")
+# GoTrue diretto nel compose (DELETE /admin/users). Con Caddy usare http://host:8090/auth/v1.
+AUTH_ADMIN_URL = os.getenv("AUTH_ADMIN_URL", "http://auth:9999").rstrip("/")
+SERVICE_ROLE_KEY = os.getenv("SERVICE_ROLE_KEY", "")
 CORS_ORIGIN_REGEX = os.getenv(
     "CORS_ORIGIN_REGEX",
     r"https://app\.drop-prj\.xyz|"

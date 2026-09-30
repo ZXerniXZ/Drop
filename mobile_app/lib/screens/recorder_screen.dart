@@ -25,11 +25,11 @@ import '../services/drop_api_headers.dart';
 import '../services/audio_binary_store.dart';
 import '../services/audio_recording_config.dart';
 import '../services/cloud_sync_service.dart';
+import '../services/legal_acceptance.dart';
 import '../services/local_database_service.dart';
 import '../services/note_audio_service.dart';
 import '../services/note_reanalysis_service.dart';
 import '../services/note_share_service.dart';
-import '../services/openrouter_client.dart';
 import '../services/recording_foreground_service.dart';
 import '../services/server_quota_service.dart';
 import '../services/supabase_auth_service.dart';
@@ -47,6 +47,7 @@ import 'note_detail_screen.dart';
 import 'update_required_screen.dart';
 import 'my_data_screen.dart';
 import 'record_orb_preview_screen.dart';
+import 'tutorial_screen.dart';
 
 class RecorderScreen extends StatefulWidget {
   const RecorderScreen({
@@ -94,6 +95,20 @@ class _RecorderScreenState extends State<RecorderScreen>
     _loadNotes();
     _loadTags();
     _loadOrbStyle();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_maybeShowTutorial());
+    });
+  }
+
+  Future<void> _maybeShowTutorial() async {
+    if (!mounted || _isRecording || _isPaused) return;
+    final pending = await AppPreferencesService.instance.loadPendingShareToken();
+    if (!mounted || (pending != null && pending.isNotEmpty)) return;
+    final seen = await AppPreferencesService.instance.hasSeenTutorial();
+    if (!mounted || seen) return;
+    await Navigator.of(context).push(
+      DropPageRoute<void>(page: const TutorialScreen()),
+    );
   }
 
   Future<void> _loadOrbStyle() async {
@@ -598,16 +613,8 @@ class _RecorderScreenState extends State<RecorderScreen>
 
       Map<String, dynamic>? result;
 
-      if (apiKey != null && apiKey.isNotEmpty) {
-        result = await OpenRouterClient.instance.processAudioFile(
-          filePath: filePath,
-          apiKey: apiKey,
-          prefs: analysisPrefs,
-          availableTags: tagsConfig.tags,
-          sourceLanguage: choice.sourceLanguage.id,
-          outputLanguage: choice.outputLanguage.id,
-        );
-      } else {
+      final accessToken = await _requireAccessToken();
+      if (apiKey == null || apiKey.isEmpty) {
         final quota = await ServerQuotaService.instance.fetch();
         if (quota != null &&
             (quota.isExhausted || quota.wouldExceed(durationSeconds))) {
@@ -618,32 +625,32 @@ class _RecorderScreenState extends State<RecorderScreen>
             remainingSeconds: quota.remainingSeconds,
           );
         }
-        final accessToken = await _requireAccessToken();
-        final jobId = await ChunkedUploadService.instance.startAnalyze(
-          uploadId: uploaded.uploadId,
-          accessToken: accessToken,
-          prefs: analysisPrefs,
-          availableTags: tagsConfig.tags,
-          sourceLanguage: choice.sourceLanguage.id,
-          outputLanguage: choice.outputLanguage.id,
-          noteId: placeholder.id,
-          durationSeconds: durationSeconds,
-        );
-        result = await _pollUploadJob(
-          jobId,
-          durationSeconds: durationSeconds,
-          onProgress: (phase, current, total) {
-            unawaited(
-              _reportAnalysisProgress(
-                placeholder.id,
-                phase: phase,
-                current: current,
-                total: total,
-              ),
-            );
-          },
-        );
       }
+      final jobId = await ChunkedUploadService.instance.startAnalyze(
+        uploadId: uploaded.uploadId,
+        accessToken: accessToken,
+        prefs: analysisPrefs,
+        availableTags: tagsConfig.tags,
+        sourceLanguage: choice.sourceLanguage.id,
+        outputLanguage: choice.outputLanguage.id,
+        noteId: placeholder.id,
+        durationSeconds: durationSeconds,
+        openRouterApiKey: apiKey,
+      );
+      result = await _pollUploadJob(
+        jobId,
+        durationSeconds: durationSeconds,
+        onProgress: (phase, current, total) {
+          unawaited(
+            _reportAnalysisProgress(
+              placeholder.id,
+              phase: phase,
+              current: current,
+              total: total,
+            ),
+          );
+        },
+      );
 
       if (!mounted) return;
 
@@ -878,7 +885,49 @@ class _RecorderScreenState extends State<RecorderScreen>
     );
   }
 
+  Future<bool> _confirmRecordingNotice() async {
+    if (LegalAcceptance.hasAcknowledgedRecordingNotice) return true;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Prima di registrare'),
+        content: const Text(
+          'Registri solo conversazioni e ambienti per cui hai titolo. '
+          'Se nell’audio ci sono altre persone, le informi.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Annulla'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Ho capito'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return false;
+    try {
+      await LegalAcceptance.saveRecordingNotice();
+      return true;
+    } catch (_) {
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Conferma non salvata. Riprova.'),
+          backgroundColor: DropColors.recordRed,
+        ),
+      );
+      return false;
+    }
+  }
+
   Future<void> _startRecording() async {
+    final noticed = await _confirmRecordingNotice();
+    if (!noticed || !mounted) return;
+
     final policy = await AppUpdateService.instance.fetchPolicy();
     if (!mounted) return;
     if (policy != null &&
@@ -1130,67 +1179,6 @@ class _RecorderScreenState extends State<RecorderScreen>
     );
   }
 
-  /// Rifà l'analisi con la chiave OpenRouter dell'utente, senza il piano Drop.
-  Future<void> _reanalyzeWithPersonalKey({
-    required AudioNote note,
-    required AudioNote processing,
-    required String apiKey,
-    required AiPreferences prefs,
-    required List<String> availableTags,
-    required String sourceLanguage,
-    required String outputLanguage,
-  }) async {
-    var path = note.audioPath;
-    final hadLocalAudio =
-        path.isNotEmpty && await AudioBinaryStore.instance.exists(path);
-    if (!hadLocalAudio) {
-      final downloaded = await NoteAudioService.instance.ensureLocalAudio(
-        note.id,
-        currentPath: path,
-      );
-      if (downloaded == null || downloaded.isEmpty) {
-        throw Exception('Audio non disponibile per rifare l\'analisi.');
-      }
-      path = downloaded;
-    }
-
-    final result = await OpenRouterClient.instance.processAudioFile(
-      filePath: path,
-      apiKey: apiKey,
-      prefs: prefs,
-      availableTags: availableTags,
-      sourceLanguage: sourceLanguage,
-      outputLanguage: outputLanguage,
-    );
-    final updated = _noteFromResponse(
-      result,
-      placeholder: processing,
-      audioPath: path,
-    ).copyWith(
-      sourceLanguage: sourceLanguage,
-      outputLanguage: outputLanguage,
-    );
-    await LocalDatabaseService.instance.saveNote(updated);
-    if (!mounted) return;
-    _updateNoteInList(updated);
-
-    try {
-      await NoteShareService.instance.publishNote(
-        updated,
-        prefs: prefs,
-        uploadAudio: hadLocalAudio,
-      );
-    } catch (_) {}
-
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Analisi rifatta'),
-        backgroundColor: Colors.green,
-      ),
-    );
-  }
-
   /// Ri-trascrive e rianalizza una nota gia' completata usando l'audio che il
   /// backend conserva. In caso di errore la nota precedente viene ripristinata:
   /// il contenuto vecchio resta valido finche' il nuovo non arriva.
@@ -1240,25 +1228,13 @@ class _RecorderScreenState extends State<RecorderScreen>
 
     try {
       final apiKey = await AppPreferencesService.instance.loadOpenRouterApiKey();
-      if (apiKey != null && apiKey.isNotEmpty) {
-        await _reanalyzeWithPersonalKey(
-          note: note,
-          processing: processing,
-          apiKey: apiKey,
-          prefs: analysisPrefs,
-          availableTags: tagsConfig.tags,
-          sourceLanguage: choice.sourceLanguage.id,
-          outputLanguage: choice.outputLanguage.id,
-        );
-        return;
-      }
-
       final jobId = await NoteReanalysisService.instance.requestReanalysis(
         noteId: note.id,
         prefs: analysisPrefs,
         availableTags: tagsConfig.tags,
         sourceLanguage: choice.sourceLanguage.id,
         outputLanguage: choice.outputLanguage.id,
+        openRouterApiKey: apiKey,
       );
 
       final result = await _pollUploadJob(

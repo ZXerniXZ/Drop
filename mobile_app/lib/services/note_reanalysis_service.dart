@@ -22,6 +22,7 @@ class NoteReanalysisService {
     required List<String> availableTags,
     String? sourceLanguage,
     String? outputLanguage,
+    String? openRouterApiKey,
   }) async {
     final token = SupabaseAuthService.instance.currentAccessToken;
     if (token == null || token.isEmpty) {
@@ -44,6 +45,8 @@ class NoteReanalysisService {
         'output_language': outputLanguage ?? prefs.outputLanguage.id,
         if (customPrompt.isNotEmpty) 'custom_prompt': customPrompt,
         'available_tags': availableTags,
+        if (openRouterApiKey != null && openRouterApiKey.isNotEmpty)
+          'openrouter_api_key': openRouterApiKey,
       }),
     );
 

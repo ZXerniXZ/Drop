@@ -7,6 +7,7 @@ import asyncio
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -22,6 +23,13 @@ from models.upload_session import (  # noqa: F401
     CHUNK_SIZE,
     LEGACY_UPLOAD_MAX_BYTES,
     UploadSessionDB,
+)
+from services.account_service import (
+    build_export_zip,
+    delete_auth_user,
+    ensure_can_delete_account,
+    purge_user_data,
+    remove_export_file,
 )
 from services.app_version import AppVersionMiddleware, version_payload
 from services.chat_service import NoteChatRequest, stream_note_chat
@@ -77,6 +85,7 @@ class NoteReanalyzeRequest(BaseModel):
     output_language: str | None = None
     custom_prompt: str | None = None
     available_tags: list[str] | None = None
+    openrouter_api_key: str | None = Field(default=None, max_length=256)
 
 
 class AnalyzeUploadRequest(BaseModel):
@@ -88,6 +97,7 @@ class AnalyzeUploadRequest(BaseModel):
     custom_prompt: str | None = None
     available_tags: list[str] | None = None
     duration_seconds: float | None = Field(default=None, ge=0)
+    openrouter_api_key: str | None = Field(default=None, max_length=256)
 
 
 class NotePublishRequest(BaseModel):
@@ -184,6 +194,7 @@ def _start_analysis_job(
     custom_prompt: str | None,
     available_tags: list[str] | None,
     estimated_seconds: float | None,
+    openrouter_api_key: str | None = None,
 ) -> str:
     job_id = str(uuid.uuid4())
     start_upload_job(
@@ -199,6 +210,7 @@ def _start_analysis_job(
         estimated_seconds=estimated_seconds,
         source_language=source_language,
         output_language=output_language,
+        openrouter_api_key=openrouter_api_key,
     )
     return job_id
 
@@ -218,6 +230,31 @@ async def _detect_owned_audio(file_path: str) -> dict[str, Any]:
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/account/export")
+async def export_account(
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    zip_path = build_export_zip(db, current_user_id)
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        filename="drop-dati.zip",
+        background=BackgroundTask(remove_export_file, str(zip_path)),
+    )
+
+
+@app.delete("/account")
+async def delete_account(
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ensure_can_delete_account(current_user_id)
+    purge_user_data(db, current_user_id)
+    await delete_auth_user(current_user_id)
+    return {"success": True}
 
 
 @app.get("/app/version")
@@ -487,7 +524,9 @@ async def reanalyze_note(
             detail="Audio file no longer on the server: cannot re-transcribe",
         )
 
-    if not (note.source_share_token or "").strip():
+    if not (note.source_share_token or "").strip() and not (
+        body.openrouter_api_key or ""
+    ).strip():
         raise_if_cannot_accept(current_user_id, note.audio_duration)
     job_id = _start_analysis_job(
         user_id=current_user_id,
@@ -501,6 +540,7 @@ async def reanalyze_note(
         custom_prompt=body.custom_prompt,
         available_tags=body.available_tags,
         estimated_seconds=note.audio_duration,
+        openrouter_api_key=body.openrouter_api_key,
     )
     return {
         "success": True,
@@ -533,7 +573,8 @@ async def analyze_uploaded_audio(
     duration = body.duration_seconds
     if duration is None:
         duration = metadata.get("duration_seconds")
-    raise_if_cannot_accept(current_user_id, duration)
+    if not (body.openrouter_api_key or "").strip():
+        raise_if_cannot_accept(current_user_id, duration)
     job_id = _start_analysis_job(
         user_id=current_user_id,
         note_id=body.note_id or metadata.get("note_id"),
@@ -546,6 +587,7 @@ async def analyze_uploaded_audio(
         custom_prompt=body.custom_prompt or metadata.get("custom_prompt"),
         available_tags=body.available_tags or metadata.get("available_tags"),
         estimated_seconds=duration,
+        openrouter_api_key=body.openrouter_api_key,
     )
     return {
         "success": True,

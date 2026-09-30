@@ -291,6 +291,7 @@ class ChunkedUploadService {
     required String outputLanguage,
     String? noteId,
     int? durationSeconds,
+    String? openRouterApiKey,
   }) async {
     final url = await ApiUrlResolver.resolveEndpoint(
       '/upload-audio/sessions/$uploadId/analyze',
@@ -309,6 +310,8 @@ class ChunkedUploadService {
         'available_tags': availableTags,
         if (durationSeconds != null && durationSeconds > 0)
           'duration_seconds': durationSeconds,
+        if (openRouterApiKey != null && openRouterApiKey.isNotEmpty)
+          'openrouter_api_key': openRouterApiKey,
       }),
     );
     _ensureAuthOrThrow(response);

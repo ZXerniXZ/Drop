@@ -196,14 +196,21 @@ async def run_upload_job(
     estimated_seconds: float | None = None,
     source_language: str | None = None,
     output_language: str | None = None,
+    openrouter_api_key: str | None = None,
 ) -> None:
     billed_seconds = 0.0
     whisper_language = source_language or language
     analysis_language = output_language or language
+    user_key = (openrouter_api_key or "").strip() or None
     try:
         probed = probe_duration_seconds(Path(file_path))
         to_bill = probed if probed and probed > 0 else estimated_seconds
-        if to_bill and to_bill > 0 and not _note_came_from_share(user_id, note_id):
+        if (
+            not user_key
+            and to_bill
+            and to_bill > 0
+            and not _note_came_from_share(user_id, note_id)
+        ):
             consume(user_id, to_bill)
             billed_seconds = to_bill
 
@@ -218,6 +225,7 @@ async def run_upload_job(
             file_path,
             language=whisper_language,
             on_progress=on_transcribe_progress,
+            api_key=user_key,
         )
         transcription = verbose["text"]
         transcript_segments = verbose["segments"]
@@ -231,6 +239,7 @@ async def run_upload_job(
             language=analysis_language,
             available_tags=available_tags,
             segments=transcript_segments,
+            api_key=user_key,
         )
         note_id = _save_note_to_db(
             user_id,
@@ -305,6 +314,7 @@ def start_upload_job(
     estimated_seconds: float | None = None,
     source_language: str | None = None,
     output_language: str | None = None,
+    openrouter_api_key: str | None = None,
 ) -> None:
     create_job(job_id, user_id=user_id)
     asyncio.create_task(
@@ -321,5 +331,6 @@ def start_upload_job(
             estimated_seconds=estimated_seconds,
             source_language=source_language,
             output_language=output_language,
+            openrouter_api_key=openrouter_api_key,
         )
     )

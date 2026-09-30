@@ -1,5 +1,4 @@
 import asyncio
-import base64
 from pathlib import Path
 
 import httpx
@@ -11,64 +10,66 @@ OPENROUTER_TRANSCRIPTIONS_URL = "https://openrouter.ai/api/v1/audio/transcriptio
 WHISPER_MODEL = "openai/whisper-large-v3"
 APP_REFERER = "https://github.com/ZXerniXZ/Drop"
 APP_TITLE = "Drop"
+# Whisper/OpenRouter rifiutano body troppo grandi. Multipart evita il +33% del JSON
+# in base64, ma il file grezzo deve restare sotto questo tetto.
+MAX_TRANSCRIPTION_FILE_BYTES = 20 * 1024 * 1024
 
-_FORMAT_MAP = {
-    ".m4a": "m4a",
-    ".mp3": "mp3",
-    ".wav": "wav",
-    ".flac": "flac",
-    ".ogg": "ogg",
-    ".webm": "webm",
-    ".aac": "aac",
+_MIME_MAP = {
+    ".m4a": "audio/mp4",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".flac": "audio/flac",
+    ".ogg": "audio/ogg",
+    ".webm": "audio/webm",
+    ".aac": "audio/aac",
 }
 
 
-def _audio_format(file_path: str) -> str:
-    suffix = Path(file_path).suffix.lower()
-    return _FORMAT_MAP.get(suffix, "m4a")
+def _mime(path: Path) -> str:
+    return _MIME_MAP.get(path.suffix.lower(), "audio/mp4")
 
 
-def _build_transcription_payload(
-    path: Path, language: str | None, *, verbose: bool
-) -> tuple[dict[str, str], dict]:
-    audio_b64 = base64.b64encode(path.read_bytes()).decode("ascii")
-
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": APP_REFERER,
-        "X-Title": APP_TITLE,
-    }
-
-    payload: dict = {
-        "model": WHISPER_MODEL,
-        "input_audio": {
-            "data": audio_b64,
-            "format": _audio_format(str(path)),
-        },
-    }
-
-    if verbose:
-        payload["response_format"] = "verbose_json"
-        payload["timestamp_granularities"] = ["segment", "word"]
-
-    lang_code = whisper_code(language)
-    if lang_code:
-        payload["language"] = lang_code
-
-    return headers, payload
+def _auth_key(api_key: str | None) -> str:
+    key = (api_key or "").strip() or OPENROUTER_API_KEY
+    if not key:
+        raise ValueError("OPENROUTER_API_KEY is not configured")
+    return key
 
 
 async def _request_transcription(
-    file_path: str, language: str | None, *, verbose: bool
+    file_path: str,
+    language: str | None,
+    *,
+    verbose: bool,
+    api_key: str | None = None,
 ) -> dict:
-    if not OPENROUTER_API_KEY:
-        raise ValueError("OPENROUTER_API_KEY is not configured")
-
     path = Path(file_path)
-    headers, payload = await asyncio.to_thread(
-        _build_transcription_payload, path, language, verbose=verbose
-    )
+    if not path.is_file():
+        raise FileNotFoundError(f"Audio file not found: {file_path}")
+
+    size = path.stat().st_size
+    if size > MAX_TRANSCRIPTION_FILE_BYTES:
+        raise ValueError(
+            f"Audio chunk too large for OpenRouter ({size} bytes). "
+            "Split or transcode before transcribing."
+        )
+
+    headers = {
+        "Authorization": f"Bearer {_auth_key(api_key)}",
+        "HTTP-Referer": APP_REFERER,
+        "X-Title": APP_TITLE,
+    }
+    form: list[tuple[str, str]] = [("model", WHISPER_MODEL)]
+    lang_code = whisper_code(language)
+    if lang_code:
+        form.append(("language", lang_code))
+    if verbose:
+        form.append(("response_format", "verbose_json"))
+        form.append(("timestamp_granularities[]", "segment"))
+        form.append(("timestamp_granularities[]", "word"))
+
+    audio_bytes = await asyncio.to_thread(path.read_bytes)
+    files = {"file": (path.name, audio_bytes, _mime(path))}
 
     timeout = httpx.Timeout(
         TRANSCRIPTION_TIMEOUT_SECONDS,
@@ -77,10 +78,20 @@ async def _request_transcription(
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(
             OPENROUTER_TRANSCRIPTIONS_URL,
-            json=payload,
             headers=headers,
+            data=form,
+            files=files,
         )
-        response.raise_for_status()
+        if response.status_code == 413:
+            raise ValueError(
+                "OpenRouter ha rifiutato l'audio: file troppo grande. "
+                f"({size} byte)"
+            )
+        if response.is_error:
+            raise ValueError(
+                f"OpenRouter transcription error {response.status_code}: "
+                f"{response.text}"
+            )
         data = response.json()
 
     if not data.get("text"):
@@ -89,20 +100,32 @@ async def _request_transcription(
     return data
 
 
-async def transcribe_audio(file_path: str, language: str | None = None) -> str:
-    data = await _request_transcription(file_path, language, verbose=False)
+async def transcribe_audio(
+    file_path: str,
+    language: str | None = None,
+    *,
+    api_key: str | None = None,
+) -> str:
+    data = await _request_transcription(
+        file_path, language, verbose=False, api_key=api_key
+    )
     return data["text"]
 
 
 async def transcribe_audio_verbose(
-    file_path: str, language: str | None = None
+    file_path: str,
+    language: str | None = None,
+    *,
+    api_key: str | None = None,
 ) -> dict:
     """Trascrizione con timestamp reali per segmento e per parola.
 
     I timestamp sono relativi all'inizio del file passato: chi lavora su
     spezzoni deve applicare l'offset del segmento.
     """
-    data = await _request_transcription(file_path, language, verbose=True)
+    data = await _request_transcription(
+        file_path, language, verbose=True, api_key=api_key
+    )
     return {
         "text": data["text"],
         "duration": data.get("duration"),
