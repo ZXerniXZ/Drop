@@ -69,6 +69,7 @@ class _RecorderScreenState extends State<RecorderScreen>
   final TextEditingController _searchController = TextEditingController();
 
   List<AudioNote> _notes = [];
+  final Set<String> _deletedNoteIds = {};
   NoteFilters _filters = const NoteFilters();
   DropNavTab _activeTab = DropNavTab.file;
   bool _isRecording = false;
@@ -170,7 +171,7 @@ class _RecorderScreenState extends State<RecorderScreen>
     final notes = await LocalDatabaseService.instance.getAllNotes();
     if (!mounted) return;
     setState(() {
-      _notes = notes;
+      _notes = _withoutDeleted(notes);
       _isLoadingNotes = false;
     });
     unawaited(_syncNotesFromCloud());
@@ -214,7 +215,14 @@ class _RecorderScreenState extends State<RecorderScreen>
 
     final notes = await LocalDatabaseService.instance.getAllNotes();
     if (!mounted) return;
-    setState(() => _notes = notes);
+    setState(() => _notes = _withoutDeleted(notes));
+  }
+
+  /// Una lettura dal database partita prima di una cancellazione puo'
+  /// tornare dopo: senza questo filtro rimetterebbe la nota in lista.
+  List<AudioNote> _withoutDeleted(List<AudioNote> notes) {
+    if (_deletedNoteIds.isEmpty) return notes;
+    return notes.where((n) => !_deletedNoteIds.contains(n.id)).toList();
   }
 
   void _updateNoteInList(AudioNote note) {
@@ -842,6 +850,10 @@ class _RecorderScreenState extends State<RecorderScreen>
   }
 
   Future<void> _deleteNote(AudioNote note) async {
+    if (!_deletedNoteIds.add(note.id)) return;
+    if (mounted) {
+      setState(() => _notes.removeWhere((n) => n.id == note.id));
+    }
     await LocalDatabaseService.instance.markNoteDeleted(note.id);
     await LocalDatabaseService.instance.deleteNote(note.id);
     unawaited(CloudSyncService.instance.deleteNoteOnServer(note.id));
@@ -853,8 +865,6 @@ class _RecorderScreenState extends State<RecorderScreen>
       );
       if (path != null) await AudioBinaryStore.instance.delete(path);
     } catch (_) {}
-    if (!mounted) return;
-    setState(() => _notes.removeWhere((n) => n.id == note.id));
   }
 
   Future<void> _togglePauseResume() async {
@@ -1513,6 +1523,9 @@ class _RecorderScreenState extends State<RecorderScreen>
       itemBuilder: (context, index) {
         final note = _filteredNotes[index];
         return StaggeredEntrance(
+          // Lo stato di swipe e chiusura appartiene alla nota, non alla
+          // posizione: senza chiave passerebbe alla card successiva.
+          key: ValueKey(note.id),
           index: index,
           child: NoteSwipeActions(
             enabled: !note.isProcessing,
