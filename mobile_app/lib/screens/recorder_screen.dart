@@ -655,6 +655,7 @@ class _RecorderScreenState extends State<RecorderScreen>
       if (!mounted) return;
 
       if (result == null) return;
+      if (await LocalDatabaseService.instance.isNoteDeleted(noteId)) return;
 
       final persistedPath =
           await _persistAudioFile(filePath, noteId) ?? filePath;
@@ -841,7 +842,9 @@ class _RecorderScreenState extends State<RecorderScreen>
   }
 
   Future<void> _deleteNote(AudioNote note) async {
+    await LocalDatabaseService.instance.markNoteDeleted(note.id);
     await LocalDatabaseService.instance.deleteNote(note.id);
+    unawaited(CloudSyncService.instance.deleteNoteOnServer(note.id));
     try {
       // Anche l'audio riscaricato dal server, che non passa per audio_path.
       final path = await NoteAudioService.instance.localPathIfExists(

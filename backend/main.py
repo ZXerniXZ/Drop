@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 import config  # noqa: F401
 from auth import get_current_user
 from database import Base, engine, ensure_schema, get_db
+from models.deleted_note import DeletedNoteDB  # noqa: F401
 from models.note import NoteDB  # noqa: F401
 from models.note_share import NoteShareDB  # noqa: F401
 from models.job import JobDB  # noqa: F401
@@ -35,6 +36,7 @@ from services.app_version import AppVersionMiddleware, version_payload
 from services.chat_service import NoteChatRequest, stream_note_chat
 from services.job_service import get_job, start_upload_job
 from services.language_detect_service import detect_language_from_audio
+from services.note_deletion import delete_note_for_user
 from services.quota_service import raise_if_cannot_accept, usage_snapshot
 from services.share_service import (
     claim_share,
@@ -480,6 +482,16 @@ async def list_notes(
     )
     notes = db.scalars(stmt).all()
     return [note.to_result_dict() for note in notes]
+
+
+@app.delete("/notes/{note_id}")
+async def delete_note(
+    note_id: str,
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    delete_note_for_user(db, note_id, current_user_id)
+    return {"success": True}
 
 
 @app.get("/notes/{note_id}")

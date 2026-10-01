@@ -18,6 +18,8 @@ class CloudSyncService {
     if (token == null || token.isEmpty) return 0;
 
     try {
+      await _retryPendingDeletes();
+
       final url = await ApiUrlResolver.resolveEndpoint('/notes');
       final response = await http.get(
         Uri.parse(url),
@@ -36,6 +38,11 @@ class CloudSyncService {
         final remoteId = item['note_id'] as String? ?? item['id'] as String?;
         if (remoteId == null || remoteId.isEmpty) continue;
 
+        if (await LocalDatabaseService.instance.isNoteDeleted(remoteId)) {
+          await deleteNoteOnServer(remoteId);
+          continue;
+        }
+
         if (await LocalDatabaseService.instance.noteExists(remoteId)) continue;
 
         await LocalDatabaseService.instance.saveNote(
@@ -47,6 +54,32 @@ class CloudSyncService {
       return inserted;
     } catch (_) {
       return 0;
+    }
+  }
+
+  Future<void> deleteNoteOnServer(String noteId) async {
+    final token = SupabaseAuthService.instance.currentAccessToken;
+    if (token == null || token.isEmpty) return;
+
+    try {
+      final url = await ApiUrlResolver.resolveEndpoint('/notes/$noteId');
+      final response = await http.delete(
+        Uri.parse(url),
+        headers: DropApiHeaders.auth(token),
+      );
+      if (response.statusCode == 200 ||
+          response.statusCode == 204 ||
+          response.statusCode == 400 ||
+          response.statusCode == 403) {
+        await LocalDatabaseService.instance.confirmNoteDeleted(noteId);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _retryPendingDeletes() async {
+    final pending = await LocalDatabaseService.instance.pendingDeletedNoteIds();
+    for (final noteId in pending) {
+      await deleteNoteOnServer(noteId);
     }
   }
 }

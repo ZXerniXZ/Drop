@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 from pathlib import Path
 
 import httpx
@@ -27,6 +28,44 @@ _MIME_MAP = {
 
 def _mime(path: Path) -> str:
     return _MIME_MAP.get(path.suffix.lower(), "audio/mp4")
+
+
+def _multipart_body(
+    fields: list[tuple[str, str]],
+    *,
+    filename: str,
+    content_type: str,
+    file_bytes: bytes,
+) -> tuple[bytes, str]:
+    """Body multipart gia' in bytes.
+
+    Una lista di coppie passata a httpx come `data=` viene trattata come
+    stream sincrono e AsyncClient risponde con
+    "Attempted to send a sync request with an AsyncClient instance".
+    """
+    boundary = f"drop{uuid.uuid4().hex}"
+    safe_name = (
+        filename.replace("\\", "_").replace('"', "_").replace("\r", "").replace("\n", "")
+    )
+    chunks: list[bytes] = []
+    for name, value in fields:
+        chunks.append(
+            (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+                f"{value}\r\n"
+            ).encode()
+        )
+    chunks.append(
+        (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="{safe_name}"\r\n'
+            f"Content-Type: {content_type}\r\n\r\n"
+        ).encode()
+    )
+    chunks.append(file_bytes)
+    chunks.append(f"\r\n--{boundary}--\r\n".encode())
+    return b"".join(chunks), boundary
 
 
 def _auth_key(api_key: str | None) -> str:
@@ -69,7 +108,13 @@ async def _request_transcription(
         form.append(("timestamp_granularities[]", "word"))
 
     audio_bytes = await asyncio.to_thread(path.read_bytes)
-    files = {"file": (path.name, audio_bytes, _mime(path))}
+    body, boundary = _multipart_body(
+        form,
+        filename=path.name,
+        content_type=_mime(path),
+        file_bytes=audio_bytes,
+    )
+    headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
 
     timeout = httpx.Timeout(
         TRANSCRIPTION_TIMEOUT_SECONDS,
@@ -79,8 +124,7 @@ async def _request_transcription(
         response = await client.post(
             OPENROUTER_TRANSCRIPTIONS_URL,
             headers=headers,
-            data=form,
-            files=files,
+            content=body,
         )
         if response.status_code == 413:
             raise ValueError(

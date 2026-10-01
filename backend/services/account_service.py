@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from config import AUTH_ADMIN_URL, SERVICE_ROLE_KEY
+from models.deleted_note import DeletedNoteDB
 from models.job import JobDB
 from models.note import NoteDB
 from models.note_share import NoteShareDB
@@ -66,6 +67,11 @@ def purge_user_data(db: Session, user_id: str) -> None:
         ).all()
     )
     jobs = list(db.scalars(select(JobDB).where(JobDB.user_id == user_id)).all())
+    tombstones = list(
+        db.scalars(
+            select(DeletedNoteDB).where(DeletedNoteDB.user_id == user_id)
+        ).all()
+    )
     usage = db.get(UserServerUsage, user_id)
 
     filenames: set[str] = set()
@@ -88,6 +94,8 @@ def purge_user_data(db: Session, user_id: str) -> None:
         db.delete(session)
     for job in jobs:
         db.delete(job)
+    for tombstone in tombstones:
+        db.delete(tombstone)
     if usage is not None:
         db.delete(usage)
     db.commit()

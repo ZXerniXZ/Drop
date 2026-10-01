@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from models.note import NoteDB
 from models.note_share import NoteShareDB
+from services.note_deletion import note_was_deleted
 
 STORAGE_DIR = Path(__file__).resolve().parent.parent / "storage"
 
@@ -149,6 +150,9 @@ def upsert_published_note(
     payload: dict[str, Any],
     audio_filename: str,
 ) -> NoteDB:
+    if note_was_deleted(db, note_id, user_id):
+        raise HTTPException(status_code=409, detail="Nota eliminata")
+
     existing = db.get(NoteDB, note_id)
     if existing is not None and existing.user_id != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")

@@ -12,6 +12,7 @@ from services.audio_segmentation_service import (
     transcribe_audio_long_verbose,
 )
 from services.llm_service import process_transcript
+from services.note_deletion import NoteWasDeleted, note_was_deleted
 from services.quota_service import QuotaExceeded, consume, refund
 
 
@@ -134,6 +135,8 @@ def _save_note_to_db(
     segments = transcript_segments or []
     db = _with_db()
     try:
+        if note_was_deleted(db, resolved_id, user_id):
+            raise NoteWasDeleted("Nota eliminata")
         existing = db.get(NoteDB, resolved_id)
         if existing is not None:
             if existing.user_id != user_id:

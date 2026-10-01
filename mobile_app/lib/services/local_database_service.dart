@@ -19,7 +19,7 @@ class LocalDatabaseService {
 
     _db = await openDatabase(
       path,
-      version: 8,
+      version: 9,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE audio_notes (
@@ -46,6 +46,7 @@ class LocalDatabaseService {
           )
         ''');
         await _createChatTable(db);
+        await _createDeletedNotesTable(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -102,8 +103,20 @@ class LocalDatabaseService {
             'ALTER TABLE audio_notes ADD COLUMN output_language TEXT',
           );
         }
+        if (oldVersion < 9) {
+          await _createDeletedNotesTable(db);
+        }
       },
     );
+  }
+
+  static Future<void> _createDeletedNotesTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS deleted_notes (
+        id TEXT PRIMARY KEY,
+        pending_remote INTEGER NOT NULL DEFAULT 1
+      )
+    ''');
   }
 
   static Future<void> _createChatTable(Database db) async {
@@ -131,6 +144,7 @@ class LocalDatabaseService {
   }
 
   Future<void> saveNote(AudioNote note) async {
+    if (await isNoteDeleted(note.id)) return;
     await _database.insert(
       'audio_notes',
       note.toMap(),
@@ -179,6 +193,48 @@ class LocalDatabaseService {
     );
   }
 
+  /// Tiene l'id anche dopo la cancellazione locale, cosi' la sync non la
+  /// riscarica. pending_remote resta 1 finche' il server non conferma.
+  Future<void> markNoteDeleted(String id) async {
+    await _database.insert(
+      'deleted_notes',
+      {'id': id, 'pending_remote': 1},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<bool> isNoteDeleted(String id) async {
+    final rows = await _database.query(
+      'deleted_notes',
+      columns: ['id'],
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
+  Future<void> confirmNoteDeleted(String id) async {
+    await _database.update(
+      'deleted_notes',
+      {'pending_remote': 0},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<List<String>> pendingDeletedNoteIds() async {
+    final rows = await _database.query(
+      'deleted_notes',
+      columns: ['id'],
+      where: 'pending_remote = 1',
+    );
+    return [
+      for (final row in rows)
+        if (row['id'] is String) row['id'] as String,
+    ];
+  }
+
   Future<List<NoteChatMessage>> getChatMessages(String noteId) async {
     final rows = await _database.query(
       'note_chat_messages',
@@ -208,5 +264,6 @@ class LocalDatabaseService {
   Future<void> deleteAllUserData() async {
     await _database.delete('note_chat_messages');
     await _database.delete('audio_notes');
+    await _database.delete('deleted_notes');
   }
 }
