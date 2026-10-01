@@ -171,8 +171,6 @@ class OpenRouterClient {
     required List<String> availableTags,
     List<Map<String, dynamic>>? segments,
   }) async {
-    final tagsPool = availableTags.where((t) => t.trim().isNotEmpty).toList();
-    final pool = tagsPool.isEmpty ? defaultAnalysisTags : tagsPool;
     final resolvedModel = resolveLlmModel(prefs.model.openRouterId);
 
     final payload = {
@@ -181,7 +179,6 @@ class OpenRouterClient {
         {
           'role': 'system',
           'content': buildAnalysisSystemPrompt(
-            pool,
             outputLanguage: prefs.outputLanguage.id,
           ),
         },
@@ -191,7 +188,6 @@ class OpenRouterClient {
             transcript: transcript,
             customPrompt: prefs.customPrompt,
             language: prefs.outputLanguage.id,
-            segments: segments,
           ),
         },
       ],
@@ -225,7 +221,7 @@ class OpenRouterClient {
 
     return parseLlmAnalysisJson(
       content,
-      pool,
+      availableTags,
       transcript: transcript,
       segments: segments,
     );
@@ -503,8 +499,7 @@ class OpenRouterClient {
       'summary': note.summary,
       'highlights': sd.highlights,
       'key_data': {
-        'location': sd.location,
-        'participants': sd.participants,
+        ...sd.keyDataPayload(),
         'tags': note.tag,
       },
       'speaker_view': sd.speakerView

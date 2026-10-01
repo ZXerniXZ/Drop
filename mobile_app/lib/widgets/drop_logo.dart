@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// White droplet for dark UI surfaces; black droplet for light UI surfaces.
+/// White hand-drawn droplet on black. Same mark in light and dark UI.
 class DropLogo extends StatelessWidget {
   const DropLogo({
     super.key,
@@ -11,13 +11,8 @@ class DropLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final asset = isDark
-        ? 'assets/branding/logo_header_dark.png'
-        : 'assets/branding/logo_header_light.png';
-
     return Image.asset(
-      asset,
+      'assets/branding/logo_header.png',
       height: height,
       width: height,
       fit: BoxFit.contain,

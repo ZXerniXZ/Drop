@@ -49,8 +49,15 @@ const _steps = <_TutorialStep>[
   ),
   _TutorialStep(
     title: 'La nota',
-    caption: 'Riassunto, highlights, voci, dati.',
-    uiAsset: 'assets/tutorial/ui_nota.jpg',
+    caption: 'Prima il riassunto.',
+    lightAsset: 'assets/tutorial/nota_light.jpg',
+    darkAsset: 'assets/tutorial/nota_dark.jpg',
+  ),
+  _TutorialStep(
+    title: 'Se ti serve',
+    caption: 'Una bolla, un approfondimento.',
+    lightAsset: 'assets/tutorial/bolle_light.jpg',
+    darkAsset: 'assets/tutorial/bolle_dark.jpg',
   ),
   _TutorialStep(
     title: 'Chiedi qui',

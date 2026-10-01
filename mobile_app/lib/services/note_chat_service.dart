@@ -66,8 +66,7 @@ class NoteChatService {
       'summary': note.summary,
       'highlights': sd.highlights,
       'key_data': {
-        'location': sd.location,
-        'participants': sd.participants,
+        ...sd.keyDataPayload(),
         'tags': note.tag,
       },
       'speaker_view': sd.speakerView

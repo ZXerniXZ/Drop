@@ -41,34 +41,76 @@ MODEL_ALIASES: dict[str, str] = {
     "google/gemini-2.5-pro": "google/gemini-2.5-pro",
 }
 
-SYSTEM_PROMPT_TEMPLATE = """You are the assistant for a voice-notes app.
-Analyze the transcript and return ONLY a valid JSON object with this exact schema:
+ANALYSIS_KINDS = ("highlights", "speakers", "key_data")
+
+BRIEF_SYSTEM_PROMPT = """You are the assistant for a voice-notes app.
+Read the transcript and return ONLY a valid JSON object with this exact schema:
 
 {{
   "title": "short descriptive title (max 60 characters, written in {output_language})",
-  "summary": "Markdown string with ## Overview, ## Key Decisions and other useful sections, written in {output_language}",
-  "highlights": ["action item or key point 1", "point 2"],
-  "key_data": {{
-    "location": "inferred place or empty string",
-    "participants": ["name or Speaker 0", "Speaker 1"],
-    "tags": "EXACTLY ONE from the allowed list"
-  }},
+  "summary": "2 to 4 sentences of plain prose, written in {output_language}"
+}}
+
+Rules:
+- title and summary MUST be written entirely in {output_language}.
+- title: concise, reflects the main content, no date/time.
+- summary: a short paragraph a person can read in a few seconds. Plain prose only.
+  No markdown, no headings, no bullet lists.
+- Do NOT include highlights, key_data, speaker_ids, speaker_view, or formatted_transcript.
+- Reply with JSON only, no markdown fences or extra text."""
+
+HIGHLIGHTS_SYSTEM_PROMPT = """You extract next steps from a voice-note transcript.
+Return ONLY a valid JSON object:
+
+{{
+  "highlights": ["imperative next step"]
+}}
+
+Rules:
+- 0 to 8 items.
+- Each item is one concrete next step, written as an imperative sentence in {output_language}.
+- No themes, no summary lines, no quotes.
+- If nothing needs doing, return an empty list.
+- Reply with JSON only, no markdown fences or extra text."""
+
+SPEAKERS_SYSTEM_PROMPT = """You diarize a voice-note transcript.
+Return ONLY a valid JSON object:
+
+{{
   "speaker_ids": [0, 0, 1, 1, 0]
 }}
 
-Allowed tags (pick exactly ONE for key_data.tags): {tag_list}
-
 Rules:
-- title, summary, and highlights MUST be written entirely in {output_language}.
-- title: concise, reflects the main content, no date/time.
-- highlights: 2-8 concrete, actionable items when possible.
-- summary: you may paraphrase freely.
 - speaker_ids: COMPACT diarization. One integer per numbered segment received
   (same length as the list). 0 = Speaker 0, 1 = Speaker 1, etc.
-  Do NOT rewrite segment text: the server assembles it from Whisper.
-  If it is a monologue or you cannot tell speakers apart, use all 0.
-- key_data.tags: MUST be one of the allowed tags above.
-- Do NOT include speaker_view or formatted_transcript.
+- Do NOT rewrite segment text.
+- If it is a monologue or you cannot tell speakers apart, use all 0.
+- Reply with JSON only, no markdown fences or extra text."""
+
+KEY_DATA_SYSTEM_PROMPT = """You extract concrete facts from a voice-note transcript.
+Return ONLY a valid JSON object:
+
+{{
+  "key_data": {{
+    "location": "place or empty string",
+    "participants": ["name"],
+    "tags": "EXACTLY ONE from the allowed list",
+    "deadlines": [{{"when": "when it is due", "what": "what is due"}}],
+    "figures": [{{"value": "the number", "what": "what it measures"}}],
+    "decisions": ["a commitment that was actually made"]
+  }}
+}}
+
+Allowed tags (pick exactly ONE): {tag_list}
+
+Rules:
+- All prose MUST be written in {output_language}.
+- Never invent. Unknown fields are an empty string or an empty list.
+- participants: names that were spoken. Do not use Speaker 0 unless no name exists.
+- deadlines: only a time tied to something that must happen.
+- figures: amounts, counts, or measurements, each with what they refer to.
+- decisions: commitments, not topics.
+- key_data.tags MUST be one of the allowed tags.
 - Reply with JSON only, no markdown fences or extra text."""
 
 DEFAULT_TAGS = [
@@ -83,18 +125,48 @@ DEFAULT_TAGS = [
 ]
 
 
-def _build_system_prompt(
+def _language_label(output_language: str | None) -> str:
+    return display_name(output_language) or "English"
+
+
+def _tag_pool(available_tags: list[str] | None) -> list[str]:
+    tags = [t.strip() for t in (available_tags or DEFAULT_TAGS) if t.strip()]
+    return tags or list(DEFAULT_TAGS)
+
+
+def empty_key_data() -> dict[str, Any]:
+    return {
+        "location": "",
+        "participants": [],
+        "tags": "",
+        "deadlines": [],
+        "figures": [],
+        "decisions": [],
+    }
+
+
+def _build_brief_system_prompt(*, output_language: str | None = None) -> str:
+    return BRIEF_SYSTEM_PROMPT.format(output_language=_language_label(output_language))
+
+
+def _build_highlights_system_prompt(*, output_language: str | None = None) -> str:
+    return HIGHLIGHTS_SYSTEM_PROMPT.format(
+        output_language=_language_label(output_language)
+    )
+
+
+def _build_speakers_system_prompt() -> str:
+    return SPEAKERS_SYSTEM_PROMPT
+
+
+def _build_key_data_system_prompt(
     available_tags: list[str] | None = None,
     *,
     output_language: str | None = None,
 ) -> str:
-    tags = [t.strip() for t in (available_tags or DEFAULT_TAGS) if t.strip()]
-    if not tags:
-        tags = DEFAULT_TAGS
-    language_label = display_name(output_language) or "English"
-    return SYSTEM_PROMPT_TEMPLATE.format(
-        tag_list=" | ".join(tags),
-        output_language=language_label,
+    return KEY_DATA_SYSTEM_PROMPT.format(
+        tag_list=" | ".join(_tag_pool(available_tags)),
+        output_language=_language_label(output_language),
     )
 
 
@@ -138,80 +210,54 @@ def _as_string_list(value: Any) -> list[str]:
     return [str(item).strip() for item in value if str(item).strip()]
 
 
+def _as_fact_list(value: Any, lead_key: str, detail_key: str) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    facts: list[dict[str, str]] = []
+    for item in value:
+        if isinstance(item, str) and item.strip():
+            facts.append({lead_key: "", detail_key: item.strip()})
+            continue
+        if not isinstance(item, dict):
+            continue
+        lead = str(item.get(lead_key) or "").strip()
+        detail = str(item.get(detail_key) or item.get("what") or "").strip()
+        if not lead and not detail:
+            continue
+        facts.append({lead_key: lead, detail_key: detail})
+    return facts[:8]
+
+
 def _normalize_key_data(
     value: Any, allowed_tags: list[str] | None = None
 ) -> dict[str, Any]:
+    pool = _tag_pool(allowed_tags)
     if not isinstance(value, dict):
-        default_tag = (allowed_tags or DEFAULT_TAGS)[0]
-        return {"location": "", "participants": [], "tags": default_tag}
+        data = empty_key_data()
+        data["tags"] = pool[0]
+        return data
 
     participants = value.get("participants", [])
     if not isinstance(participants, list):
         participants = []
 
-    pool = [t.strip() for t in (allowed_tags or DEFAULT_TAGS) if t.strip()]
-    if not pool:
-        pool = DEFAULT_TAGS
-
-    tags = str(value.get("tags", pool[0])).strip() or pool[0]
+    tags = str(value.get("tags", "")).strip()
     matched = next((t for t in pool if t.lower() == tags.lower()), pool[0])
 
     return {
         "location": str(value.get("location", "")).strip(),
         "participants": [str(p).strip() for p in participants if str(p).strip()],
         "tags": matched,
+        "deadlines": _as_fact_list(value.get("deadlines"), "when", "what"),
+        "figures": _as_fact_list(value.get("figures"), "value", "what"),
+        "decisions": _as_string_list(value.get("decisions"))[:8],
     }
 
 
-def _parse_llm_json(
-    content: str, allowed_tags: list[str] | None = None
-) -> dict[str, Any]:
-    data = _load_first_json_object(content)
-
-    title = str(data.get("title", "")).strip()
-    summary = str(data.get("summary", "")).strip()
-    highlights = _as_string_list(data.get("highlights"))
-    key_data = _normalize_key_data(data.get("key_data"), allowed_tags)
-
-    if not summary:
-        raise ValueError("LLM response missing summary")
-
-    if not title:
-        title = "Voice note"
-
-    return {
-        "title": title[:80],
-        "summary": summary,
-        "highlights": highlights,
-        "key_data": key_data,
-        "speaker_ids": data.get("speaker_ids"),
-    }
-
-
-def _build_user_prompt(
-    transcript: str,
-    custom_prompt: str | None,
-    *,
-    segments: list[dict[str, Any]] | None = None,
-) -> str:
-    parts = [
-        "Trascrizione grezza (per titolo, summary, highlights):\n\n",
-        transcript,
-    ]
-    if segments:
-        numbered = format_segments_for_diarization(segments)
-        parts.append(
-            f"\n\nCi sono {len(segments)} segmenti Whisper. Restituisci "
-            f"speaker_ids con esattamente {len(segments)} interi (0-based). "
-            "Non riscrivere il testo dei segmenti.\n\n"
-            f"Segmenti numerati:\n\n{numbered}"
-        )
-
+def _with_custom_prompt(prompt: str, custom_prompt: str | None) -> str:
     if custom_prompt and custom_prompt.strip():
-        parts.append(
-            f"\n\nIstruzioni aggiuntive dell'utente:\n{custom_prompt.strip()}"
-        )
-    return "".join(parts)
+        return f"{prompt}\n\nIstruzioni aggiuntive dell'utente:\n{custom_prompt.strip()}"
+    return prompt
 
 
 def _truncate_transcript(text: str) -> str:
@@ -233,32 +279,16 @@ def _assemble_speaker_fields(
     return build_from_raw_transcript(transcript)
 
 
-async def process_transcript(
-    transcript: str,
+async def _complete_json(
     *,
-    model: str | None = None,
-    custom_prompt: str | None = None,
-    language: str | None = None,
-    available_tags: list[str] | None = None,
-    segments: list[dict[str, Any]] | None = None,
-    api_key: str | None = None,
+    system: str,
+    user: str,
+    model: str | None,
+    api_key: str | None,
 ) -> dict[str, Any]:
     resolved_key = (api_key or "").strip() or OPENROUTER_API_KEY
     if not resolved_key:
         raise ValueError("OPENROUTER_API_KEY is not configured")
-
-    resolved_model = resolve_llm_model(model)
-    user_prompt = _build_user_prompt(
-        _truncate_transcript(transcript),
-        custom_prompt,
-        segments=segments,
-    )
-    tags_pool = [t.strip() for t in (available_tags or DEFAULT_TAGS) if t.strip()]
-    output_label = display_name(language)
-    if output_label:
-        user_prompt = (
-            f"Write title, summary, and highlights in {output_label}.\n\n{user_prompt}"
-        )
 
     headers = {
         "Authorization": f"Bearer {resolved_key}",
@@ -266,12 +296,11 @@ async def process_transcript(
         "HTTP-Referer": APP_REFERER,
         "X-Title": APP_TITLE,
     }
-
     payload = {
-        "model": resolved_model,
+        "model": resolve_llm_model(model),
         "messages": [
-            {"role": "system", "content": _build_system_prompt(tags_pool, output_language=language)},
-            {"role": "user", "content": user_prompt},
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
         ],
         "response_format": {"type": "json_object"},
     }
@@ -292,13 +321,117 @@ async def process_transcript(
         content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError) as exc:
         raise ValueError("Unexpected OpenRouter chat response format") from exc
+    return _load_first_json_object(content)
 
-    parsed = _parse_llm_json(content, tags_pool)
-    speaker_view, formatted = _assemble_speaker_fields(
-        transcript,
-        segments=segments,
-        speaker_ids=parsed.pop("speaker_ids", None),
+
+async def process_transcript(
+    transcript: str,
+    *,
+    model: str | None = None,
+    custom_prompt: str | None = None,
+    language: str | None = None,
+    available_tags: list[str] | None = None,
+    segments: list[dict[str, Any]] | None = None,
+    api_key: str | None = None,
+) -> dict[str, Any]:
+    del available_tags, segments
+    label = _language_label(language)
+    user_prompt = _with_custom_prompt(
+        f"Write the title and the summary in {label}.\n\n"
+        "Trascrizione:\n\n"
+        f"{_truncate_transcript(transcript)}",
+        custom_prompt,
     )
-    parsed["speaker_view"] = speaker_view
-    parsed["formatted_transcript"] = formatted or transcript
-    return parsed
+    data = await _complete_json(
+        system=_build_brief_system_prompt(output_language=language),
+        user=user_prompt,
+        model=model,
+        api_key=api_key,
+    )
+    title = str(data.get("title", "")).strip() or "Voice note"
+    summary = str(data.get("summary", "")).strip()
+    if not summary:
+        raise ValueError("LLM response missing summary")
+    parsed = {"title": title[:80], "summary": summary}
+    return {
+        "title": parsed["title"],
+        "summary": parsed["summary"],
+        "highlights": [],
+        "key_data": empty_key_data(),
+        "speaker_view": [],
+        "formatted_transcript": transcript,
+        "analysis_state": {},
+    }
+
+
+async def process_optional_analysis(
+    kind: str,
+    transcript: str,
+    *,
+    model: str | None = None,
+    custom_prompt: str | None = None,
+    language: str | None = None,
+    available_tags: list[str] | None = None,
+    segments: list[dict[str, Any]] | None = None,
+    api_key: str | None = None,
+) -> dict[str, Any]:
+    if kind not in ANALYSIS_KINDS:
+        raise ValueError(f"Unknown analysis kind: {kind}")
+
+    clipped = _truncate_transcript(transcript)
+    label = _language_label(language)
+
+    if kind == "highlights":
+        data = await _complete_json(
+            system=_build_highlights_system_prompt(output_language=language),
+            user=_with_custom_prompt(
+                f"Write every highlight in {label}.\n\nTrascrizione:\n\n{clipped}",
+                custom_prompt,
+            ),
+            model=model,
+            api_key=api_key,
+        )
+        return {"highlights": _as_string_list(data.get("highlights"))[:8]}
+
+    if kind == "speakers":
+        if not segments:
+            view, formatted = build_from_raw_transcript(transcript)
+            return {
+                "speaker_view": view,
+                "formatted_transcript": formatted or transcript,
+            }
+        numbered = format_segments_for_diarization(segments)
+        data = await _complete_json(
+            system=_build_speakers_system_prompt(),
+            user=_with_custom_prompt(
+                f"Ci sono {len(segments)} segmenti Whisper. Restituisci "
+                f"speaker_ids con esattamente {len(segments)} interi (0-based). "
+                "Non riscrivere il testo dei segmenti.\n\n"
+                f"Segmenti numerati:\n\n{numbered}",
+                custom_prompt,
+            ),
+            model=model,
+            api_key=api_key,
+        )
+        speaker_view, formatted = _assemble_speaker_fields(
+            transcript,
+            segments=segments,
+            speaker_ids=data.get("speaker_ids"),
+        )
+        return {
+            "speaker_view": speaker_view,
+            "formatted_transcript": formatted or transcript,
+        }
+
+    data = await _complete_json(
+        system=_build_key_data_system_prompt(
+            available_tags, output_language=language
+        ),
+        user=_with_custom_prompt(
+            f"Write every text field in {label}.\n\nTrascrizione:\n\n{clipped}",
+            custom_prompt,
+        ),
+        model=model,
+        api_key=api_key,
+    )
+    return {"key_data": _normalize_key_data(data.get("key_data"), available_tags)}

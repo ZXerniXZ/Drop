@@ -34,7 +34,13 @@ from services.account_service import (
 )
 from services.app_version import AppVersionMiddleware, version_payload
 from services.chat_service import NoteChatRequest, stream_note_chat
-from services.job_service import get_job, start_upload_job
+from services.job_service import (
+    get_job,
+    list_active_jobs,
+    start_optional_analysis_job,
+    start_upload_job,
+)
+from services.llm_service import ANALYSIS_KINDS
 from services.language_detect_service import detect_language_from_audio
 from services.note_deletion import delete_note_for_user
 from services.quota_service import raise_if_cannot_accept, usage_snapshot
@@ -80,6 +86,14 @@ app.add_middleware(
 )
 
 
+class NoteAnalysisRequest(BaseModel):
+    ai_model: str | None = None
+    output_language: str | None = None
+    custom_prompt: str | None = None
+    available_tags: list[str] | None = None
+    openrouter_api_key: str | None = Field(default=None, max_length=256)
+
+
 class NoteReanalyzeRequest(BaseModel):
     ai_model: str | None = None
     language: str | None = None
@@ -112,6 +126,7 @@ class NotePublishRequest(BaseModel):
     highlights: list[str] = Field(default_factory=list)
     key_data: dict[str, Any] = Field(default_factory=dict)
     speaker_view: list[dict[str, Any]] = Field(default_factory=list)
+    analysis_state: dict[str, Any] | None = None
     transcript_segments: list[dict[str, Any]] = Field(default_factory=list)
     audio_duration: float | None = None
     source_language: str | None = None
@@ -454,6 +469,13 @@ async def upload_audio(
     }
 
 
+@app.get("/jobs/active")
+async def list_upload_jobs(
+    current_user_id: str = Depends(get_current_user),
+):
+    return list_active_jobs(current_user_id)
+
+
 @app.get("/jobs/{job_id}")
 async def get_upload_job(
     job_id: str,
@@ -519,6 +541,41 @@ async def get_note_audio(
         media_type=AUDIO_MEDIA_TYPES.get(path.suffix.lower(), "application/octet-stream"),
         filename=path.name,
     )
+
+
+@app.post("/notes/{note_id}/analyses/{kind}")
+async def start_note_analysis(
+    note_id: str,
+    kind: str,
+    body: NoteAnalysisRequest,
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if kind not in ANALYSIS_KINDS:
+        raise HTTPException(status_code=404, detail="Unknown analysis")
+    note = _get_owned_note(db, note_id, current_user_id)
+    transcript = (note.raw_transcription or note.formatted_transcription or "").strip()
+    if not transcript:
+        raise HTTPException(status_code=409, detail="Trascrizione mancante")
+    job_id = str(uuid.uuid4())
+    start_optional_analysis_job(
+        job_id,
+        user_id=current_user_id,
+        note_id=note.id,
+        kind=kind,
+        ai_model=body.ai_model,
+        custom_prompt=body.custom_prompt,
+        available_tags=body.available_tags,
+        output_language=body.output_language or note.output_language,
+        openrouter_api_key=body.openrouter_api_key,
+    )
+    return {
+        "success": True,
+        "job_id": job_id,
+        "status": "processing",
+        "note_id": note.id,
+        "kind": kind,
+    }
 
 
 @app.post("/notes/{note_id}/reanalyze")

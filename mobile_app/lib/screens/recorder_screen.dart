@@ -70,6 +70,7 @@ class _RecorderScreenState extends State<RecorderScreen>
 
   List<AudioNote> _notes = [];
   final Set<String> _deletedNoteIds = {};
+  final Set<String> _watchingNoteIds = {};
   NoteFilters _filters = const NoteFilters();
   DropNavTab _activeTab = DropNavTab.file;
   bool _isRecording = false;
@@ -145,6 +146,9 @@ class _RecorderScreenState extends State<RecorderScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_resumeProcessingNotes());
+    }
     if (!kIsWeb) return;
     if (!_isRecording && !_isPaused) return;
     if (state == AppLifecycleState.hidden ||
@@ -176,6 +180,7 @@ class _RecorderScreenState extends State<RecorderScreen>
     });
     unawaited(_syncNotesFromCloud());
     unawaited(_claimPendingShare());
+    unawaited(_resumeProcessingNotes());
   }
 
   Future<void> _claimPendingShare() async {
@@ -288,15 +293,9 @@ class _RecorderScreenState extends State<RecorderScreen>
     final summary = data['summary'] as String? ?? '';
     final title = (data['title'] as String?)?.trim();
     final structured = NoteStructuredData.fromResponse(data);
-
-    var tag = placeholder.tag;
-    final keyData = data['key_data'];
-    if (keyData is Map<String, dynamic>) {
-      final tagLabel = keyData['tags'] as String?;
-      if (tagLabel != null && tagLabel.isNotEmpty) {
-        tag = NoteTagsConfig.normalizeTag(tagLabel, allowed: _availableTags);
-      }
-    }
+    final tag = structured.tagLabel.isNotEmpty
+        ? NoteTagsConfig.normalizeTag(structured.tagLabel, allowed: _availableTags)
+        : 'Memo';
 
     final segments = TranscriptSegment.listFromResponse(
       data['transcript_segments'],
@@ -367,10 +366,25 @@ class _RecorderScreenState extends State<RecorderScreen>
 
       final url = await _resolveJobUrl(jobId);
       final accessToken = await _requireAccessToken();
-      final response = await http.get(
-        Uri.parse(url),
-        headers: DropApiHeaders.auth(accessToken),
-      );
+      late final http.Response response;
+      try {
+        response = await http
+            .get(
+              Uri.parse(url),
+              headers: DropApiHeaders.auth(accessToken),
+            )
+            .timeout(const Duration(seconds: 20));
+      } on TimeoutException {
+        await Future<void>.delayed(pollInterval);
+        continue;
+      } catch (error) {
+        gatewayFailures++;
+        if (gatewayFailures >= maxGatewayFailures) {
+          throw Exception('Connessione interrotta. $error');
+        }
+        await Future<void>.delayed(pollInterval);
+        continue;
+      }
 
       if (response.statusCode == 401 || response.statusCode == 403) {
         throw Exception('Sessione scaduta. Effettua di nuovo l\'accesso.');
@@ -573,11 +587,187 @@ class _RecorderScreenState extends State<RecorderScreen>
     _updateNoteInList(cancelled);
   }
 
+  Future<void> _rememberAnalysisJob(String noteId, String jobId) async {
+    final index = _notes.indexWhere((note) => note.id == noteId);
+    if (index == -1) return;
+    final updated = _notes[index].copyWith(analysisJobId: jobId);
+    await LocalDatabaseService.instance.saveNote(updated);
+    if (!mounted) return;
+    _updateNoteInList(updated);
+  }
+
+  Future<void> _applyCompletedAnalysis(
+    String noteId,
+    Map<String, dynamic> result,
+  ) async {
+    if (await LocalDatabaseService.instance.isNoteDeleted(noteId)) return;
+    final index = _notes.indexWhere((note) => note.id == noteId);
+    final placeholder = index == -1
+        ? await LocalDatabaseService.instance.getNote(noteId)
+        : _notes[index];
+    if (placeholder == null) return;
+    final note = _noteFromResponse(
+      result,
+      placeholder: placeholder,
+      audioPath: placeholder.audioPath,
+    ).copyWith(clearUploadSession: true, uploadedChunks: 0, clearAnalysisJob: true);
+    await LocalDatabaseService.instance.saveNote(note);
+    if (!mounted) return;
+    _updateNoteInList(note);
+  }
+
+  bool _remoteNoteReady(Map<String, dynamic> data) {
+    final summary = (data['summary'] as String?)?.trim() ?? '';
+    final raw = (data['raw_transcription'] as String?)?.trim() ?? '';
+    final formatted = (data['formatted_transcription'] as String?)?.trim() ?? '';
+    return summary.isNotEmpty || raw.isNotEmpty || formatted.isNotEmpty;
+  }
+
+  /// [reachable] is false when the request failed, so a missing note is not
+  /// confused with a network error.
+  Future<({bool reachable, Map<String, dynamic>? note})> _fetchServerNote(
+    String noteId,
+  ) async {
+    try {
+      final accessToken = await _requireAccessToken();
+      final url = await ApiUrlResolver.resolveEndpoint('/notes/$noteId');
+      final response = await http
+          .get(Uri.parse(url), headers: DropApiHeaders.auth(accessToken))
+          .timeout(const Duration(seconds: 20));
+      if (response.statusCode == 404) return (reachable: true, note: null);
+      if (response.statusCode != 200) return (reachable: false, note: null);
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) {
+        return (reachable: false, note: null);
+      }
+      return (reachable: true, note: decoded);
+    } catch (_) {
+      return (reachable: false, note: null);
+    }
+  }
+
+  /// Null when the server does not list active jobs yet.
+  Future<List<Map<String, dynamic>>?> _fetchActiveJobs() async {
+    try {
+      final accessToken = await _requireAccessToken();
+      final url = await ApiUrlResolver.resolveEndpoint('/jobs/active');
+      final response = await http
+          .get(Uri.parse(url), headers: DropApiHeaders.auth(accessToken))
+          .timeout(const Duration(seconds: 20));
+      if (response.statusCode == 404) return null;
+      if (response.statusCode != 200) return null;
+      final decoded = jsonDecode(response.body);
+      if (decoded is! List) return null;
+      return decoded.whereType<Map<String, dynamic>>().toList();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String? _matchActiveJob(
+    AudioNote note,
+    List<Map<String, dynamic>> jobs,
+    int processingCount,
+  ) {
+    for (final job in jobs) {
+      if (job['note_id'] == note.id) return job['job_id'] as String?;
+    }
+    final unbound = jobs.where((job) {
+      final id = job['note_id'] as String?;
+      return id == null || id.isEmpty;
+    }).toList();
+    if (processingCount == 1 && unbound.length == 1) {
+      return unbound.first['job_id'] as String?;
+    }
+    return null;
+  }
+
+  Future<void> _resumeProcessingNotes() async {
+    final pending = _notes.where((note) => note.isProcessing).toList();
+    for (final note in pending) {
+      unawaited(_reattachNote(note, processingCount: pending.length));
+    }
+  }
+
+  Future<void> _reattachNote(
+    AudioNote note, {
+    required int processingCount,
+  }) async {
+    if (!_watchingNoteIds.add(note.id)) return;
+    var handedOff = false;
+    try {
+      var jobId = note.analysisJobId;
+      if (jobId == null || jobId.isEmpty) {
+        final active = await _fetchActiveJobs();
+        if (active != null) {
+          jobId = _matchActiveJob(note, active, processingCount);
+        }
+      }
+      if (jobId != null && jobId.isNotEmpty) {
+        await _rememberAnalysisJob(note.id, jobId);
+        final result = await _pollUploadJob(
+          jobId,
+          durationSeconds: note.durationSeconds,
+          onProgress: (phase, current, total) {
+            unawaited(
+              _reportAnalysisProgress(
+                note.id,
+                phase: phase,
+                current: current,
+                total: total,
+              ),
+            );
+          },
+        );
+        if (result != null) {
+          await _applyCompletedAnalysis(note.id, result);
+        }
+        return;
+      }
+
+      final remote = await _fetchServerNote(note.id);
+      if (remote.note != null && _remoteNoteReady(remote.note!)) {
+        await _applyCompletedAnalysis(note.id, remote.note!);
+        return;
+      }
+      if (!remote.reachable || remote.note != null) return;
+
+      final active = await _fetchActiveJobs();
+      final audioReady =
+          note.audioPath.isNotEmpty &&
+          await AudioBinaryStore.instance.exists(note.audioPath);
+      if (active != null && active.isEmpty && audioReady) {
+        _watchingNoteIds.remove(note.id);
+        handedOff = true;
+        await _processUpload(
+          noteId: note.id,
+          filePath: note.audioPath,
+          durationSeconds: note.durationSeconds,
+        );
+      }
+    } catch (e) {
+      final index = _notes.indexWhere((item) => item.id == note.id);
+      if (index == -1) return;
+      final failed = _notes[index].copyWith(
+        analysisStatus: NoteAnalysisStatus.failed,
+        transcription: 'Errore: $e',
+        clearAnalysisJob: true,
+        clearAnalysisProgress: true,
+      );
+      await LocalDatabaseService.instance.saveNote(failed);
+      if (!mounted) return;
+      _updateNoteInList(failed);
+    } finally {
+      if (!handedOff) _watchingNoteIds.remove(note.id);
+    }
+  }
+
   Future<void> _processUpload({
     required String noteId,
     required String filePath,
     required int durationSeconds,
   }) async {
+    if (!_watchingNoteIds.add(noteId)) return;
     try {
       final prefs = await AppPreferencesService.instance.loadAiPreferences();
       final tagsConfig = await AppPreferencesService.instance.loadNoteTags();
@@ -645,6 +835,7 @@ class _RecorderScreenState extends State<RecorderScreen>
         durationSeconds: durationSeconds,
         openRouterApiKey: apiKey,
       );
+      await _rememberAnalysisJob(placeholder.id, jobId);
       result = await _pollUploadJob(
         jobId,
         durationSeconds: durationSeconds,
@@ -660,8 +851,6 @@ class _RecorderScreenState extends State<RecorderScreen>
         },
       );
 
-      if (!mounted) return;
-
       if (result == null) return;
       if (await LocalDatabaseService.instance.isNoteDeleted(noteId)) return;
 
@@ -676,6 +865,7 @@ class _RecorderScreenState extends State<RecorderScreen>
       ).copyWith(
         clearUploadSession: true,
         uploadedChunks: 0,
+        clearAnalysisJob: true,
         sourceLanguage: choice.sourceLanguage.id,
         outputLanguage: choice.outputLanguage.id,
       );
@@ -705,6 +895,8 @@ class _RecorderScreenState extends State<RecorderScreen>
         final failed = _notes[index].copyWith(
           analysisStatus: NoteAnalysisStatus.failed,
           transcription: e.message,
+          clearAnalysisJob: true,
+          clearAnalysisProgress: true,
         );
         await LocalDatabaseService.instance.saveNote(failed);
         if (!mounted) return;
@@ -718,10 +910,14 @@ class _RecorderScreenState extends State<RecorderScreen>
       final failed = _notes[index].copyWith(
         analysisStatus: NoteAnalysisStatus.failed,
         transcription: 'Errore: $e',
+        clearAnalysisJob: true,
+        clearAnalysisProgress: true,
       );
       await LocalDatabaseService.instance.saveNote(failed);
       if (!mounted) return;
       _updateNoteInList(failed);
+    } finally {
+      _watchingNoteIds.remove(noteId);
     }
   }
 
@@ -1056,6 +1252,7 @@ class _RecorderScreenState extends State<RecorderScreen>
         isNew: true,
         tag: 'Memo',
         analysisStatus: NoteAnalysisStatus.processing,
+        analysisPhase: NoteAnalysisPhase.uploading,
       );
 
       await LocalDatabaseService.instance.saveNote(placeholder);
@@ -1249,6 +1446,7 @@ class _RecorderScreenState extends State<RecorderScreen>
         outputLanguage: choice.outputLanguage.id,
         openRouterApiKey: apiKey,
       );
+      await _rememberAnalysisJob(note.id, jobId);
 
       final result = await _pollUploadJob(
         jobId,
@@ -1264,13 +1462,14 @@ class _RecorderScreenState extends State<RecorderScreen>
           );
         },
       );
-      if (result == null || !mounted) return;
+      if (result == null) return;
 
       final updated = _noteFromResponse(
         result,
         placeholder: processing,
         audioPath: note.audioPath,
       ).copyWith(
+        clearAnalysisJob: true,
         sourceLanguage: choice.sourceLanguage.id,
         outputLanguage: choice.outputLanguage.id,
       );
@@ -1327,6 +1526,10 @@ class _RecorderScreenState extends State<RecorderScreen>
           onDelete: () => _deleteNote(note),
           onRetry: note.isFailed ? () => _retryAnalysis(note) : null,
           onReanalyze: note.isFailed ? null : () => _reanalyzeNote(note),
+          onChanged: (updated) {
+            if (!mounted) return;
+            _updateNoteInList(updated);
+          },
         ),
       ),
     );

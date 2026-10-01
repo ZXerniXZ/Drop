@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select
+
 from database import SessionLocal
 from models.job import JobDB
 from models.note import NoteDB
@@ -11,7 +13,7 @@ from services.audio_segmentation_service import (
     probe_duration_seconds,
     transcribe_audio_long_verbose,
 )
-from services.llm_service import process_transcript
+from services.llm_service import ANALYSIS_KINDS, process_optional_analysis, process_transcript
 from services.note_deletion import NoteWasDeleted, note_was_deleted
 from services.quota_service import QuotaExceeded, consume, refund
 
@@ -37,7 +39,13 @@ def _note_came_from_share(user_id: str, note_id: str | None) -> bool:
         db.close()
 
 
-def create_job(job_id: str, *, user_id: str) -> None:
+def create_job(
+    job_id: str,
+    *,
+    user_id: str,
+    phase: str = "transcribing",
+    note_id: str | None = None,
+) -> None:
     db = _with_db()
     try:
         db.add(
@@ -45,13 +53,27 @@ def create_job(job_id: str, *, user_id: str) -> None:
                 id=job_id,
                 user_id=user_id,
                 status="processing",
-                phase="transcribing",
+                phase=phase,
+                note_id=(note_id or "").strip() or None,
             )
         )
         db.commit()
     except Exception:
         db.rollback()
         raise
+    finally:
+        db.close()
+
+
+def list_active_jobs(user_id: str) -> list[dict[str, Any]]:
+    db = _with_db()
+    try:
+        stmt = (
+            select(JobDB)
+            .where(JobDB.user_id == user_id, JobDB.status == "processing")
+            .order_by(JobDB.created_at.desc())
+        )
+        return [job.to_status_dict() for job in db.scalars(stmt).all()]
     finally:
         db.close()
 
@@ -148,6 +170,7 @@ def _save_note_to_db(
             existing.highlights = processed["highlights"]
             existing.key_data = processed["key_data"]
             existing.speaker_view = processed["speaker_view"]
+            existing.analysis_state = processed.get("analysis_state") or {}
             existing.transcript_segments = segments
             existing.audio_duration = audio_duration
             existing.audio_filename = saved_name
@@ -169,6 +192,7 @@ def _save_note_to_db(
             highlights=processed["highlights"],
             key_data=processed["key_data"],
             speaker_view=processed["speaker_view"],
+            analysis_state=processed.get("analysis_state") or {},
             transcript_segments=segments,
             audio_duration=audio_duration,
             audio_filename=saved_name,
@@ -266,6 +290,7 @@ async def run_upload_job(
             "highlights": processed["highlights"],
             "key_data": processed["key_data"],
             "speaker_view": processed["speaker_view"],
+            "analysis_state": processed.get("analysis_state") or {},
             "transcript_segments": transcript_segments,
             "audio_duration": audio_duration,
             "source_language": whisper_language,
@@ -319,7 +344,7 @@ def start_upload_job(
     output_language: str | None = None,
     openrouter_api_key: str | None = None,
 ) -> None:
-    create_job(job_id, user_id=user_id)
+    create_job(job_id, user_id=user_id, note_id=note_id)
     asyncio.create_task(
         run_upload_job(
             job_id,
@@ -333,6 +358,134 @@ def start_upload_job(
             available_tags=available_tags,
             estimated_seconds=estimated_seconds,
             source_language=source_language,
+            output_language=output_language,
+            openrouter_api_key=openrouter_api_key,
+        )
+    )
+
+
+def _merge_optional_analysis(
+    user_id: str,
+    note_id: str,
+    kind: str,
+    processed: dict[str, Any],
+) -> dict[str, Any]:
+    db = _with_db()
+    try:
+        if note_was_deleted(db, note_id, user_id):
+            raise NoteWasDeleted("Nota eliminata")
+        note = db.get(NoteDB, note_id)
+        if note is None or note.user_id != user_id:
+            raise PermissionError("Nota non trovata")
+        state = dict(note.analysis_state or {})
+        if kind == "highlights":
+            note.highlights = processed.get("highlights") or []
+            state["highlights"] = "ready"
+        elif kind == "speakers":
+            note.speaker_view = processed.get("speaker_view") or []
+            formatted = processed.get("formatted_transcript")
+            if formatted:
+                note.formatted_transcription = formatted
+            state["speakers"] = "ready"
+        elif kind == "key_data":
+            note.key_data = processed.get("key_data") or {}
+            state["key_data"] = "ready"
+        note.analysis_state = state
+        db.add(note)
+        db.commit()
+        db.refresh(note)
+        return note.to_result_dict()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+async def run_optional_analysis_job(
+    job_id: str,
+    *,
+    user_id: str,
+    note_id: str,
+    kind: str,
+    ai_model: str | None,
+    custom_prompt: str | None,
+    available_tags: list[str] | None,
+    output_language: str | None,
+    openrouter_api_key: str | None,
+) -> None:
+    user_key = (openrouter_api_key or "").strip() or None
+    try:
+        if kind not in ANALYSIS_KINDS:
+            raise ValueError("Analisi sconosciuta")
+
+        db = _with_db()
+        try:
+            note = db.get(NoteDB, note_id)
+            if note is None or note.user_id != user_id:
+                raise PermissionError("Nota non trovata")
+            transcript = (note.raw_transcription or note.formatted_transcription or "").strip()
+            segments = list(note.transcript_segments or [])
+            language = output_language or note.output_language
+        finally:
+            db.close()
+
+        if not transcript:
+            raise ValueError("Trascrizione mancante")
+
+        _update_job_progress(job_id, phase="analyzing")
+        processed = await process_optional_analysis(
+            kind,
+            transcript,
+            model=ai_model,
+            custom_prompt=custom_prompt,
+            language=language,
+            available_tags=available_tags,
+            segments=segments,
+            api_key=user_key,
+        )
+        result = _merge_optional_analysis(user_id, note_id, kind, processed)
+        _update_job(
+            job_id,
+            status="completed",
+            phase="completed",
+            clear_progress=True,
+            result=result,
+            error=None,
+            note_id=note_id,
+        )
+    except Exception as exc:
+        _update_job(
+            job_id,
+            status="failed",
+            phase="failed",
+            clear_progress=True,
+            error=str(exc),
+        )
+
+
+def start_optional_analysis_job(
+    job_id: str,
+    *,
+    user_id: str,
+    note_id: str,
+    kind: str,
+    ai_model: str | None,
+    custom_prompt: str | None,
+    available_tags: list[str] | None,
+    output_language: str | None,
+    openrouter_api_key: str | None,
+) -> None:
+    create_job(job_id, user_id=user_id, phase="analyzing", note_id=note_id)
+    asyncio.create_task(
+        run_optional_analysis_job(
+            job_id,
+            user_id=user_id,
+            note_id=note_id,
+            kind=kind,
+            ai_model=ai_model,
+            custom_prompt=custom_prompt,
+            available_tags=available_tags,
             output_language=output_language,
             openrouter_api_key=openrouter_api_key,
         )

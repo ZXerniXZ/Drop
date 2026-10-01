@@ -99,6 +99,7 @@ def _copy_note_fields(source: NoteDB, *, new_id: str, user_id: str, token: str) 
         highlights=list(source.highlights or []),
         key_data=dict(source.key_data or {}),
         speaker_view=list(source.speaker_view or []),
+        analysis_state=dict(source.analysis_state or {}),
         transcript_segments=list(source.transcript_segments or []),
         audio_duration=source.audio_duration,
         audio_filename=_copy_audio_file(source.audio_filename),
@@ -179,6 +180,9 @@ def upsert_published_note(
     note.key_data = key_data if isinstance(key_data, dict) else {}
     speaker_view = payload.get("speaker_view") or []
     note.speaker_view = speaker_view if isinstance(speaker_view, list) else []
+    analysis_state = payload.get("analysis_state")
+    if isinstance(analysis_state, dict):
+        note.analysis_state = analysis_state
     segments = payload.get("transcript_segments") or []
     note.transcript_segments = segments if isinstance(segments, list) else []
     duration = payload.get("audio_duration")

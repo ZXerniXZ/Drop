@@ -19,7 +19,7 @@ class LocalDatabaseService {
 
     _db = await openDatabase(
       path,
-      version: 9,
+      version: 10,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE audio_notes (
@@ -41,6 +41,7 @@ class LocalDatabaseService {
             analysis_phase TEXT,
             analysis_current INTEGER NOT NULL DEFAULT 0,
             analysis_total INTEGER NOT NULL DEFAULT 0,
+            analysis_job_id TEXT,
             source_language TEXT,
             output_language TEXT
           )
@@ -106,6 +107,11 @@ class LocalDatabaseService {
         if (oldVersion < 9) {
           await _createDeletedNotesTable(db);
         }
+        if (oldVersion < 10) {
+          await db.execute(
+            'ALTER TABLE audio_notes ADD COLUMN analysis_job_id TEXT',
+          );
+        }
       },
     );
   }
@@ -158,6 +164,17 @@ class LocalDatabaseService {
       orderBy: 'date_time DESC',
     );
     return rows.map(AudioNote.fromMap).toList();
+  }
+
+  Future<AudioNote?> getNote(String id) async {
+    final rows = await _database.query(
+      'audio_notes',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return AudioNote.fromMap(rows.first);
   }
 
   Future<bool> noteExists(String id) async {

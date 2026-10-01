@@ -13,7 +13,7 @@ void main() {
     await AppPreferencesService.instance.init();
   });
 
-  testWidgets('walks the six pages and closes on the last', (tester) async {
+  testWidgets('walks the pages and closes on the last', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         theme: DropTheme.light(),
@@ -30,7 +30,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Il tasto al centro'), findsOneWidget);
 
-    for (var i = 0; i < 4; i++) {
+    for (var i = 0; i < 5; i++) {
       await tester.tap(find.text('Avanti'));
       await tester.pumpAndSettle();
     }

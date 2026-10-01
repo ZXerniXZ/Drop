@@ -81,6 +81,7 @@ flutter:
     - assets/branding/
     - assets/animations/
     - assets/tutorial/
+    - assets/analyses/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

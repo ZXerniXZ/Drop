@@ -61,12 +61,10 @@ Extra commentary after JSON''';
         ],
       );
       expect(result['title'], 'Test');
-      expect(result['key_data'], isA<Map>());
-      expect((result['key_data'] as Map)['tags'], 'Meeting');
-      final view = result['speaker_view'] as List;
-      expect(view.length, 2);
-      expect((view[0] as Map)['text'], 'Ciao');
-      expect((view[1] as Map)['text'], 'mondo');
+      expect(result['highlights'], isEmpty);
+      expect(result['speaker_view'], isEmpty);
+      expect(result['formatted_transcript'], 'Ciao mondo');
+      expect(result['analysis_state'], isEmpty);
     });
   });
 }

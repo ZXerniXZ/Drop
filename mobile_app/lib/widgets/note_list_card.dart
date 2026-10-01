@@ -32,9 +32,11 @@ class NoteListCard extends StatelessWidget {
             ? (note.transcription.isNotEmpty
                 ? note.transcription
                 : 'Analisi fallita')
-            : note.transcription.isNotEmpty
-                ? note.transcription
-                : note.rawTranscription;
+            : note.summary.trim().isNotEmpty
+                ? note.summary.trim()
+                : note.transcription.isNotEmpty
+                    ? note.transcription
+                    : note.rawTranscription;
 
     return Material(
       color: isDark ? DropColors.darkSurface : DropColors.lightSurface,

@@ -26,56 +26,189 @@ class SpeakerBlock {
       };
 }
 
+class NoteFact {
+  const NoteFact({required this.lead, required this.detail});
+
+  final String lead;
+  final String detail;
+
+  bool get isEmpty => lead.trim().isEmpty && detail.trim().isEmpty;
+
+  factory NoteFact.fromMap(
+    Map<String, dynamic> map, {
+    required String leadKey,
+  }) {
+    return NoteFact(
+      lead: map[leadKey]?.toString().trim() ?? '',
+      detail: map['what']?.toString().trim() ??
+          map['detail']?.toString().trim() ??
+          '',
+    );
+  }
+
+  Map<String, dynamic> toMap(String leadKey) => {
+        leadKey: lead,
+        'what': detail,
+      };
+}
+
 class NoteStructuredData {
   const NoteStructuredData({
     this.highlights = const [],
     this.location = '',
     this.participants = const [],
+    this.tagLabel = '',
+    this.deadlines = const [],
+    this.figures = const [],
+    this.decisions = const [],
     this.speakerView = const [],
+    this.analysisState = const {},
+    this.checkedHighlights = const [],
   });
+
+  static const highlightsKind = 'highlights';
+  static const speakersKind = 'speakers';
+  static const keyDataKind = 'key_data';
 
   final List<String> highlights;
   final String location;
   final List<String> participants;
+  final String tagLabel;
+  final List<NoteFact> deadlines;
+  final List<NoteFact> figures;
+  final List<String> decisions;
   final List<SpeakerBlock> speakerView;
+  final Map<String, String> analysisState;
+  final List<String> checkedHighlights;
 
-  bool get hasData =>
-      highlights.isNotEmpty ||
-      location.isNotEmpty ||
-      participants.isNotEmpty ||
-      speakerView.isNotEmpty;
+  bool isReady(String kind) => analysisState[kind] == 'ready';
+
+  bool get hasPeople => participants.isNotEmpty;
+  bool get hasLocation => location.trim().isNotEmpty;
+  bool get hasDeadlines => deadlines.any((fact) => !fact.isEmpty);
+  bool get hasFigures => figures.any((fact) => !fact.isEmpty);
+  bool get hasDecisions => decisions.isNotEmpty;
+  bool get hasTag => tagLabel.trim().isNotEmpty;
+
+  bool get keyDataHasSubstance =>
+      hasPeople || hasLocation || hasDeadlines || hasFigures || hasDecisions;
+
+  /// Note vecchie: il riassunto a sezioni significava che le tre analisi
+  /// erano gia' state fatte, anche se una lista e' rimasta vuota.
+  NoteStructuredData withLegacySummary(String summary) {
+    if (!summary.contains('##')) return this;
+    return copyWith(
+      analysisState: {
+        ...analysisState,
+        highlightsKind: analysisState[highlightsKind] ?? 'ready',
+        speakersKind: analysisState[speakersKind] ?? 'ready',
+        keyDataKind: analysisState[keyDataKind] ?? 'ready',
+      },
+    );
+  }
+
+  NoteStructuredData copyWith({
+    List<String>? highlights,
+    String? location,
+    List<String>? participants,
+    String? tagLabel,
+    List<NoteFact>? deadlines,
+    List<NoteFact>? figures,
+    List<String>? decisions,
+    List<SpeakerBlock>? speakerView,
+    Map<String, String>? analysisState,
+    List<String>? checkedHighlights,
+  }) {
+    return NoteStructuredData(
+      highlights: highlights ?? this.highlights,
+      location: location ?? this.location,
+      participants: participants ?? this.participants,
+      tagLabel: tagLabel ?? this.tagLabel,
+      deadlines: deadlines ?? this.deadlines,
+      figures: figures ?? this.figures,
+      decisions: decisions ?? this.decisions,
+      speakerView: speakerView ?? this.speakerView,
+      analysisState: analysisState ?? this.analysisState,
+      checkedHighlights: checkedHighlights ?? this.checkedHighlights,
+    );
+  }
 
   factory NoteStructuredData.fromResponse(Map<String, dynamic> data) {
     final highlightsRaw = data['highlights'];
     final highlights = highlightsRaw is List
-        ? highlightsRaw.map((e) => e.toString()).toList()
+        ? highlightsRaw
+            .map((e) => e.toString().trim())
+            .where((e) => e.isNotEmpty)
+            .toList()
         : <String>[];
 
     final keyData = data['key_data'];
     var location = '';
     var participants = <String>[];
-    if (keyData is Map<String, dynamic>) {
-      location = keyData['location'] as String? ?? '';
-      final p = keyData['participants'];
-      if (p is List) {
-        participants = p.map((e) => e.toString()).toList();
+    var tagLabel = '';
+    var deadlines = <NoteFact>[];
+    var figures = <NoteFact>[];
+    var decisions = <String>[];
+    if (keyData is Map) {
+      final map = Map<String, dynamic>.from(keyData);
+      location = map['location']?.toString().trim() ?? '';
+      final people = map['participants'];
+      if (people is List) {
+        participants = people
+            .map((e) => e.toString().trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
+      }
+      tagLabel = map['tags']?.toString().trim() ?? '';
+      deadlines = _facts(map['deadlines'], leadKey: 'when');
+      figures = _facts(map['figures'], leadKey: 'value');
+      final decisionRaw = map['decisions'];
+      if (decisionRaw is List) {
+        decisions = decisionRaw
+            .map((e) => e.toString().trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
       }
     }
 
     final speakerRaw = data['speaker_view'];
     final speakerView = speakerRaw is List
         ? speakerRaw
-            .whereType<Map<String, dynamic>>()
-            .map(SpeakerBlock.fromMap)
+            .whereType<Map>()
+            .map((item) => SpeakerBlock.fromMap(Map<String, dynamic>.from(item)))
             .where((b) => b.text.isNotEmpty)
             .toList()
         : <SpeakerBlock>[];
+
+    final checkedRaw = data['checked_highlights'];
+    final checked = checkedRaw is List
+        ? checkedRaw
+            .map((e) => e.toString())
+            .where((e) => e.isNotEmpty)
+            .toList()
+        : <String>[];
 
     return NoteStructuredData(
       highlights: highlights,
       location: location,
       participants: participants,
+      tagLabel: tagLabel,
+      deadlines: deadlines,
+      figures: figures,
+      decisions: decisions,
       speakerView: speakerView,
+      analysisState: _analysisState(
+        data,
+        summary: data['summary']?.toString() ?? '',
+        highlights: highlights,
+        speakerView: speakerView,
+        hasSubstance: location.isNotEmpty ||
+            participants.isNotEmpty ||
+            deadlines.isNotEmpty ||
+            figures.isNotEmpty ||
+            decisions.isNotEmpty,
+      ),
+      checkedHighlights: checked,
     );
   }
 
@@ -95,8 +228,70 @@ class NoteStructuredData {
       'key_data': {
         'location': location,
         'participants': participants,
+        'tags': tagLabel,
+        'deadlines': deadlines.map((fact) => fact.toMap('when')).toList(),
+        'figures': figures.map((fact) => fact.toMap('value')).toList(),
+        'decisions': decisions,
       },
       'speaker_view': speakerView.map((b) => b.toMap()).toList(),
+      'analysis_state': analysisState,
+      'checked_highlights': checkedHighlights,
     });
+  }
+
+  Map<String, dynamic> keyDataPayload() => {
+        'location': location,
+        'participants': participants,
+        'tags': tagLabel,
+        'deadlines': deadlines.map((fact) => fact.toMap('when')).toList(),
+        'figures': figures.map((fact) => fact.toMap('value')).toList(),
+        'decisions': decisions,
+      };
+
+  static List<NoteFact> _facts(dynamic raw, {required String leadKey}) {
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map(
+          (item) => NoteFact.fromMap(
+            Map<String, dynamic>.from(item),
+            leadKey: leadKey,
+          ),
+        )
+        .where((fact) => !fact.isEmpty)
+        .toList();
+  }
+
+  static Map<String, String> _analysisState(
+    Map<String, dynamic> data, {
+    required String summary,
+    required List<String> highlights,
+    required List<SpeakerBlock> speakerView,
+    required bool hasSubstance,
+  }) {
+    final state = <String, String>{};
+    final raw = data['analysis_state'];
+    if (raw is Map) {
+      raw.forEach((key, value) {
+        final label = value?.toString() ?? '';
+        if (label.isNotEmpty) state[key.toString()] = label;
+      });
+    }
+    if (summary.contains('##')) {
+      state.putIfAbsent(highlightsKind, () => 'ready');
+      state.putIfAbsent(speakersKind, () => 'ready');
+      state.putIfAbsent(keyDataKind, () => 'ready');
+      return state;
+    }
+    if (highlights.isNotEmpty) {
+      state.putIfAbsent(highlightsKind, () => 'ready');
+    }
+    if (speakerView.isNotEmpty) {
+      state.putIfAbsent(speakersKind, () => 'ready');
+    }
+    if (hasSubstance) {
+      state.putIfAbsent(keyDataKind, () => 'ready');
+    }
+    return state;
   }
 }

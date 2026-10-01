@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
-"""Regenerate Drop branding assets from source PNGs in repo assets/."""
+"""Regenerate Drop branding from the white hand-drawn droplet on black."""
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
-# logo_light.png = white droplet on black (dark UI / app icon)
-# logo_dark.png = black droplet on white (light UI)
-SRC_DARK_UI = ROOT / "assets/branding/source/logo_light.png"
-SRC_LIGHT_UI = ROOT / "assets/branding/source/logo_dark.png"
+SRC = ROOT / "assets/branding/source/logo_white_on_black.jpg"
 
 WEB_ICONS = ROOT / "web/icons"
 WEB_ROOT = ROOT / "web"
@@ -20,91 +16,69 @@ OUT = ROOT / "assets/branding"
 ANDROID_RES = ROOT / "android/app/src/main/res"
 IOS_ICON_DIR = ROOT / "ios/Runner/AppIconAlt"
 APPICON = ROOT / "ios/Runner/Assets.xcassets/AppIcon.appiconset"
+MACICON = ROOT / "macos/Runner/Assets.xcassets/AppIcon.appiconset"
+
+# Sampled from the approved artwork. Adaptive-icon background must match.
+PAPER = (20, 20, 20, 255)
 
 
-def stroke_bounds(im: Image.Image, is_dark: bool) -> tuple[int, int, int, int]:
-    w, h = im.size
-    px = im.load()
+def ink_bounds(im: Image.Image) -> tuple[int, int, int, int]:
+    rgb = im.convert("RGB")
+    w, h = rgb.size
+    px = rgb.load()
     minx, miny, maxx, maxy = w, h, 0, 0
     for y in range(h):
         for x in range(w):
-            r, g, b = px[x, y]
-            if is_dark:
-                if max(r, g, b) > 45:
-                    minx, miny = min(minx, x), min(miny, y)
-                    maxx, maxy = max(maxx, x), max(maxy, y)
-            else:
-                if min(r, g, b) < 190:
-                    minx, miny = min(minx, x), min(miny, y)
-                    maxx, maxy = max(maxx, x), max(maxy, y)
+            if max(px[x, y]) > 40:
+                minx, miny = min(minx, x), min(miny, y)
+                maxx, maxy = max(maxx, x), max(maxy, y)
     return minx, miny, maxx, maxy
 
 
-def crop_droplet_square(path: Path, is_dark: bool, pad: int = 24) -> Image.Image:
-    im = Image.open(path).convert("RGBA")
-    minx, miny, maxx, maxy = stroke_bounds(im.convert("RGB"), is_dark)
-    size = max(maxx - minx, maxy - miny) + pad * 2
-    cx = (minx + maxx) // 2
-    cy = (miny + maxy) // 2
-    left = max(0, cx - size // 2)
-    top = max(0, cy - size // 2)
-    right = min(im.width, left + size)
-    bottom = min(im.height, top + size)
-    cropped = im.crop((left, top, right, bottom))
-    side = max(cropped.size)
-    square = Image.new("RGBA", (side, side), (0, 0, 0, 0))
-    ox = (side - cropped.width) // 2
-    oy = (side - cropped.height) // 2
-    square.paste(cropped, (ox, oy))
-    return square
-
-
-def make_transparent(square: Image.Image, is_dark: bool) -> Image.Image:
-    im = square.copy()
-    px = im.load()
-    w, h = im.size
-    for y in range(h):
-        for x in range(w):
-            r, g, b, a = px[x, y]
-            if is_dark:
-                if r < 35 and g < 35 and b < 35:
-                    px[x, y] = (0, 0, 0, 0)
-            else:
-                if r > 170 and g > 170 and b > 170:
-                    px[x, y] = (0, 0, 0, 0)
+def load_icon() -> Image.Image:
+    """Approved square: white droplet, black field, original framing."""
+    im = Image.open(SRC).convert("RGB")
+    if im.size != (1024, 1024):
+        im = im.resize((1024, 1024), Image.Resampling.LANCZOS)
     return im
 
 
-def make_app_icon(square: Image.Image, is_dark: bool, size: int = 1024) -> Image.Image:
-    bg = (0, 0, 0, 255) if is_dark else (250, 250, 250, 255)
-    canvas = Image.new("RGBA", (size, size), bg)
-    target = int(size * 0.72)
-    scaled = square.resize((target, target), Image.Resampling.LANCZOS)
-    ox = (size - target) // 2
-    oy = (size - target) // 2
-    canvas.paste(scaled, (ox, oy), scaled)
-    return canvas.convert("RGB")
+def header_mark(icon: Image.Image) -> Image.Image:
+    """Same mark, cropped tighter so it stays readable beside the wordmark."""
+    minx, miny, maxx, maxy = ink_bounds(icon)
+    ink_h = maxy - miny
+    pad = int(ink_h * 0.14)
+    side = max(maxx - minx, ink_h) + pad * 2
+    cx = (minx + maxx) // 2
+    cy = (miny + maxy) // 2
+    left = max(0, cx - side // 2)
+    top = max(0, cy - side // 2)
+    right = min(icon.width, left + side)
+    bottom = min(icon.height, top + side)
+    cropped = icon.crop((left, top, right, bottom))
+    canvas = Image.new("RGB", (side, side), PAPER[:3])
+    canvas.paste(cropped, ((side - cropped.width) // 2, (side - cropped.height) // 2))
+    return canvas
+
+
+def save_resized(icon: Image.Image, path: Path, size: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    icon.resize((size, size), Image.Resampling.LANCZOS).save(path)
 
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     IOS_ICON_DIR.mkdir(parents=True, exist_ok=True)
+    WEB_ICONS.mkdir(parents=True, exist_ok=True)
 
-    dark_ui_sq = crop_droplet_square(SRC_DARK_UI, True)
-    light_ui_sq = crop_droplet_square(SRC_LIGHT_UI, False)
+    icon = load_icon()
+    icon.save(OUT / "app_icon_1024.png")
+    # Keep the previous filenames so nothing still pointing at them shows the old mark.
+    icon.save(OUT / "app_icon_dark_1024.png")
+    icon.save(OUT / "app_icon_light_1024.png")
 
-    make_transparent(dark_ui_sq, True).resize((112, 112), Image.Resampling.LANCZOS).save(
-        OUT / "logo_header_dark.png"
-    )
-    make_transparent(light_ui_sq, False).resize((112, 112), Image.Resampling.LANCZOS).save(
-        OUT / "logo_header_light.png"
-    )
-
-    app_icon = make_app_icon(dark_ui_sq, True)
-    light_icon = make_app_icon(light_ui_sq, False)
-    app_icon_fg = make_transparent(dark_ui_sq, True)
-    app_icon.save(OUT / "app_icon_dark_1024.png")
-    light_icon.save(OUT / "app_icon_light_1024.png")
+    header = header_mark(icon).resize((256, 256), Image.Resampling.LANCZOS)
+    header.save(OUT / "logo_header.png")
 
     for folder, sz in {
         "mipmap-mdpi": 48,
@@ -114,25 +88,15 @@ def main() -> None:
         "mipmap-xxxhdpi": 192,
     }.items():
         d = ANDROID_RES / folder
-        d.mkdir(parents=True, exist_ok=True)
-        app_icon.resize((sz, sz), Image.Resampling.LANCZOS).save(d / "ic_launcher.png")
-        light_icon.resize((sz, sz), Image.Resampling.LANCZOS).save(d / "ic_launcher_light.png")
-        fg_sz = int(sz * 0.72)
-        fg = app_icon_fg.resize((fg_sz, fg_sz), Image.Resampling.LANCZOS)
-        fg_canvas = Image.new("RGBA", (sz, sz), (0, 0, 0, 0))
-        offset = (sz - fg_sz) // 2
-        fg_canvas.paste(fg, (offset, offset), fg)
-        fg_canvas.save(d / "ic_launcher_foreground.png")
+        save_resized(icon, d / "ic_launcher.png", sz)
+        save_resized(icon, d / "ic_launcher_light.png", sz)
+        save_resized(icon, d / "ic_launcher_foreground.png", sz)
 
-    for name, icon, sizes in [
-        ("light", light_icon, ((120, 180),)),
-    ]:
-        icon120 = icon.resize((120, 120), Image.Resampling.LANCZOS)
-        icon180 = icon.resize((180, 180), Image.Resampling.LANCZOS)
-        icon120.save(IOS_ICON_DIR / f"{name}@2x.png")
-        icon180.save(IOS_ICON_DIR / f"{name}@3x.png")
+    for name in ("default", "light", "dark"):
+        save_resized(icon, IOS_ICON_DIR / f"{name}@2x.png", 120)
+        save_resized(icon, IOS_ICON_DIR / f"{name}@3x.png", 180)
 
-    mapping = {
+    ios_sizes = {
         "Icon-App-20x20@1x.png": 20,
         "Icon-App-20x20@2x.png": 40,
         "Icon-App-20x20@3x.png": 60,
@@ -149,26 +113,27 @@ def main() -> None:
         "Icon-App-83.5x83.5@2x.png": 167,
         "Icon-App-1024x1024@1x.png": 1024,
     }
-    for name, sz in mapping.items():
-        app_icon.resize((sz, sz), Image.Resampling.LANCZOS).save(APPICON / name)
+    for name, sz in ios_sizes.items():
+        save_resized(icon, APPICON / name, sz)
 
-    WEB_ICONS.mkdir(parents=True, exist_ok=True)
+    for sz, name in (
+        (16, "app_icon_16.png"),
+        (32, "app_icon_32.png"),
+        (64, "app_icon_64.png"),
+        (128, "app_icon_128.png"),
+        (256, "app_icon_256.png"),
+        (512, "app_icon_512.png"),
+        (1024, "app_icon_1024.png"),
+    ):
+        save_resized(icon, MACICON / name, sz)
+
     for sz in (192, 512):
-        app_icon.resize((sz, sz), Image.Resampling.LANCZOS).save(
-            WEB_ICONS / f"Icon-{sz}.png"
-        )
-        maskable = Image.new("RGB", (sz, sz), (9, 9, 11))
-        inner = int(sz * 0.72)
-        scaled = app_icon.resize((inner, inner), Image.Resampling.LANCZOS)
-        offset = (sz - inner) // 2
-        maskable.paste(scaled, (offset, offset))
-        maskable.save(WEB_ICONS / f"Icon-maskable-{sz}.png")
-    app_icon.resize((180, 180), Image.Resampling.LANCZOS).save(
-        WEB_ICONS / "apple-touch-icon.png"
-    )
-    app_icon.resize((32, 32), Image.Resampling.LANCZOS).save(WEB_ROOT / "favicon.png")
+        save_resized(icon, WEB_ICONS / f"Icon-{sz}.png", sz)
+        save_resized(icon, WEB_ICONS / f"Icon-maskable-{sz}.png", sz)
+    save_resized(icon, WEB_ICONS / "apple-touch-icon.png", 180)
+    save_resized(icon, WEB_ROOT / "favicon.png", 32)
 
-    print("Branding assets regenerated.")
+    print("Branding assets regenerated from the white droplet on black.")
 
 
 if __name__ == "__main__":

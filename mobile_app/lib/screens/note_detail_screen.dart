@@ -4,16 +4,22 @@ import 'package:flutter/services.dart';
 import '../models/audio_note.dart';
 import '../models/note_structured_data.dart';
 import '../services/app_preferences_service.dart';
+import '../services/local_database_service.dart';
+import '../services/note_analysis_service.dart';
 import '../services/note_share_service.dart';
 import '../theme/drop_theme.dart';
 import '../widgets/drop_markdown.dart';
+import '../widgets/note_detail/analysis_picker.dart';
 import '../widgets/note_detail/ask_ai_bar.dart';
+import '../widgets/note_detail/highlights_section.dart';
+import '../widgets/note_detail/key_data_section.dart';
 import '../widgets/note_detail/note_chat_sheet.dart';
 import '../widgets/note_detail/note_audio_player.dart';
+import '../widgets/note_detail/speakers_section.dart';
 
 enum _DetailMode { sources, notes }
 
-enum _NotesSubTab { highlights, summary, speakerView, keyData }
+enum _NotesPage { summary, picker, highlights, speakers, keyData }
 
 class NoteDetailScreen extends StatefulWidget {
   const NoteDetailScreen({
@@ -22,12 +28,14 @@ class NoteDetailScreen extends StatefulWidget {
     required this.onDelete,
     this.onRetry,
     this.onReanalyze,
+    this.onChanged,
   });
 
   final AudioNote note;
   final VoidCallback onDelete;
   final VoidCallback? onRetry;
   final VoidCallback? onReanalyze;
+  final ValueChanged<AudioNote>? onChanged;
 
   @override
   State<NoteDetailScreen> createState() => _NoteDetailScreenState();
@@ -35,9 +43,16 @@ class NoteDetailScreen extends StatefulWidget {
 
 class _NoteDetailScreenState extends State<NoteDetailScreen> {
   _DetailMode _mode = _DetailMode.notes;
-  _NotesSubTab _subTab = _NotesSubTab.summary;
+  _NotesPage _page = _NotesPage.summary;
+  late AudioNote _note;
   final _askAiController = TextEditingController();
-  final Map<int, bool> _checkedItems = {};
+  final _running = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _note = widget.note;
+  }
 
   @override
   void dispose() {
@@ -45,22 +60,12 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
     super.dispose();
   }
 
-  String _formatTimestamp(DateTime dateTime) {
-    final day = dateTime.day.toString().padLeft(2, '0');
-    final month = dateTime.month.toString().padLeft(2, '0');
-    final year = dateTime.year;
-    final hour = dateTime.hour.toString().padLeft(2, '0');
-    final minute = dateTime.minute.toString().padLeft(2, '0');
-    final second = dateTime.second.toString().padLeft(2, '0');
-    return '$year-$month-$day $hour:$minute:$second';
-  }
-
   Future<void> _confirmDelete() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Elimina nota'),
-        content: Text('Vuoi eliminare "${widget.note.title}"?'),
+        content: Text('Vuoi eliminare "${_note.title}"?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -88,8 +93,8 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Rifai analisi'),
         content: const Text(
-          'L\'audio verra\' trascritto e analizzato di nuovo da zero. '
-          'Titolo, riassunto e highlights attuali saranno sostituiti.',
+          'L\'audio verra\' trascritto di nuovo e il riassunto breve rifatto. '
+          'Highlights, voci e dati gia\' generati vengono azzerati.',
         ),
         actions: [
           TextButton(
@@ -106,7 +111,6 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
 
     if (confirmed != true || !mounted) return;
     widget.onReanalyze!();
-    // L'avanzamento si segue dalla lista: qui i dati sarebbero ormai vecchi.
     Navigator.of(context).pop();
   }
 
@@ -121,7 +125,7 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
     try {
       final prefs = await AppPreferencesService.instance.loadAiPreferences();
       final url = await NoteShareService.instance.createShareUrl(
-        widget.note,
+        _note,
         prefs: prefs,
       );
       if (!mounted) return;
@@ -147,7 +151,7 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
           actions: [
             TextButton(
               onPressed: () async {
-                await NoteShareService.instance.revokeShare(widget.note.id);
+                await NoteShareService.instance.revokeShare(_note.id);
                 if (context.mounted) Navigator.pop(context, 'revoked');
               },
               child: const Text(
@@ -197,9 +201,71 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
   void _openChatSheet({String? initialMessage}) {
     showNoteChatSheet(
       context,
-      note: widget.note,
+      note: _note,
       initialMessage: initialMessage,
     );
+  }
+
+  void _goBack() {
+    if (_mode == _DetailMode.sources || _page == _NotesPage.summary) {
+      Navigator.of(context).pop();
+      return;
+    }
+    setState(() {
+      _page = _page == _NotesPage.picker ? _NotesPage.summary : _NotesPage.picker;
+    });
+  }
+
+  Future<void> _toggleHighlight(String text, bool checked) async {
+    final current = List<String>.from(_note.structuredData.checkedHighlights);
+    if (checked) {
+      if (!current.contains(text)) current.add(text);
+    } else {
+      current.remove(text);
+    }
+    final updated = _note.copyWith(
+      structuredData: _note.structuredData.copyWith(checkedHighlights: current),
+    );
+    setState(() => _note = updated);
+    await LocalDatabaseService.instance.saveNote(updated);
+    widget.onChanged?.call(updated);
+  }
+
+  Future<void> _selectAnalysis(String kind) async {
+    if (_note.structuredData.isReady(kind)) {
+      setState(() => _page = _pageFor(kind));
+      return;
+    }
+    if (_running.contains(kind)) return;
+
+    setState(() => _running.add(kind));
+    try {
+      final updated = await NoteAnalysisService.instance.run(
+        note: _note,
+        kind: kind,
+      );
+      if (!mounted) {
+        widget.onChanged?.call(updated);
+        return;
+      }
+      setState(() => _note = updated);
+      widget.onChanged?.call(updated);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e')),
+      );
+    } finally {
+      if (mounted) setState(() => _running.remove(kind));
+    }
+  }
+
+  _NotesPage _pageFor(String kind) {
+    return switch (kind) {
+      NoteStructuredData.speakersKind => _NotesPage.speakers,
+      NoteStructuredData.keyDataKind => _NotesPage.keyData,
+      _ => _NotesPage.highlights,
+    };
   }
 
   @override
@@ -209,26 +275,25 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
         child: Column(
           children: [
             _buildTopBar(context),
-            if (widget.note.isFailed) _buildFailedBanner(context),
-            if (_mode == _DetailMode.notes) _buildSubTabBar(context),
+            if (_note.isFailed) _buildFailedBanner(context),
             Expanded(
               child: _mode == _DetailMode.sources
                   ? NoteAudioPlayer(
-                      noteId: widget.note.id,
-                      audioPath: widget.note.audioPath,
-                      fallbackDurationSeconds: widget.note.durationSeconds,
-                      segments: widget.note.transcriptSegments,
+                      noteId: _note.id,
+                      audioPath: _note.audioPath,
+                      fallbackDurationSeconds: _note.durationSeconds,
+                      segments: _note.transcriptSegments,
                     )
-                  : _buildNotesContent(context),
+                  : _buildNotesBody(context),
             ),
             AskAiBar(
               controller: _askAiController,
               onSend: _onAskAiSend,
               onOpenChat: () => _openChatSheet(),
-              enabled: !widget.note.isProcessing && !widget.note.isFailed,
-              hintText: widget.note.isProcessing
+              enabled: !_note.isProcessing && !_note.isFailed,
+              hintText: _note.isProcessing
                   ? 'Analisi in corso...'
-                  : widget.note.isFailed
+                  : _note.isFailed
                       ? 'Analisi fallita'
                       : 'Chiedi a Drop su questa nota...',
             ),
@@ -260,10 +325,10 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
                   letterSpacing: 1,
                 ),
           ),
-          if (widget.note.transcription.isNotEmpty) ...[
+          if (_note.transcription.isNotEmpty) ...[
             const SizedBox(height: 6),
             Text(
-              widget.note.transcription,
+              _note.transcription,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: DropColors.recordRed.withValues(alpha: 0.9),
                     fontSize: 12,
@@ -298,14 +363,18 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
       child: Row(
         children: [
           IconButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: _goBack,
             icon: const Icon(Icons.chevron_left, size: 28),
             color: DropColors.muted(context),
           ),
-          Expanded(child: Center(child: _ModeToggle(
-            mode: _mode,
-            onChanged: (m) => setState(() => _mode = m),
-          ))),
+          Expanded(
+            child: Center(
+              child: _ModeToggle(
+                mode: _mode,
+                onChanged: (mode) => setState(() => _mode = mode),
+              ),
+            ),
+          ),
           if (widget.onReanalyze != null)
             IconButton(
               onPressed: _confirmReanalyze,
@@ -313,7 +382,7 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
               color: DropColors.muted(context),
               tooltip: 'Rifai analisi',
             ),
-          if (!widget.note.isFailed)
+          if (!_note.isFailed)
             IconButton(
               onPressed: _shareNote,
               icon: const Icon(Icons.ios_share, size: 22),
@@ -331,60 +400,92 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
     );
   }
 
-  Widget _buildSubTabBar(BuildContext context) {
-    const tabs = _NotesSubTab.values;
-    const labels = ['Highlights', 'Summary', 'Speaker View', 'Key Data'];
+  Widget _buildNotesBody(BuildContext context) {
+    if (_page == _NotesPage.picker) {
+      return AnalysisPicker(
+        data: _note.structuredData,
+        running: _running,
+        onSelect: _selectAnalysis,
+      );
+    }
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-      child: Row(
-        children: List.generate(tabs.length, (i) {
-          final tab = tabs[i];
-          final isActive = _subTab == tab;
-          return Padding(
-            padding: EdgeInsets.only(right: i < tabs.length - 1 ? 8 : 0),
-            child: _TabPill(
-              label: labels[i],
-              isActive: isActive,
-              onTap: () => setState(() => _subTab = tab),
-            ),
-          );
-        }),
-      ),
-    );
-  }
-
-  Widget _buildNotesContent(BuildContext context) {
+    final summary = _note.summary.trim();
     return ListView(
-      padding: const EdgeInsets.fromLTRB(24, 4, 24, 16),
+      padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
       children: [
         Text(
-          widget.note.title,
+          _note.title,
           style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                 fontWeight: FontWeight.w300,
                 height: 1.25,
               ),
         ),
-        const SizedBox(height: 16),
-        switch (_subTab) {
-          _NotesSubTab.highlights => _HighlightsTab(
-              highlights: widget.note.structuredData.highlights,
-              checkedItems: _checkedItems,
-              onToggle: (i, v) => setState(() => _checkedItems[i] = v),
+        const SizedBox(height: 20),
+        switch (_page) {
+          _NotesPage.summary => Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (summary.isEmpty)
+                  const SizedBox.shrink()
+                else
+                  DropMarkdown(data: summary),
+                if (!_note.isFailed) ...[
+                  const SizedBox(height: 36),
+                  Center(
+                    child: _PlusButton(
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        setState(() => _page = _NotesPage.picker);
+                      },
+                    ),
+                  ),
+                ],
+              ],
             ),
-          _NotesSubTab.summary => _SummaryTab(note: widget.note),
-          _NotesSubTab.speakerView => _SpeakerViewTab(
-              blocks: widget.note.structuredData.speakerView,
+          _NotesPage.highlights => HighlightsSection(
+              highlights: _note.structuredData.highlights,
+              checked: _note.structuredData.checkedHighlights,
+              onToggle: (text, value) => _toggleHighlight(text, value),
             ),
-          _NotesSubTab.keyData => _KeyDataTab(
-              dateTime: _formatTimestamp(widget.note.dateTime),
-              location: widget.note.structuredData.location,
-              participants: widget.note.structuredData.participants,
-              tag: widget.note.tag,
+          _NotesPage.speakers => SpeakersSection(
+              blocks: _note.structuredData.speakerView,
             ),
+          _NotesPage.keyData => KeyDataSection(data: _note.structuredData),
+          _NotesPage.picker => const SizedBox.shrink(),
         },
       ],
+    );
+  }
+}
+
+class _PlusButton extends StatelessWidget {
+  const _PlusButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: Container(
+          width: 56,
+          height: 56,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: DropColors.border(context)),
+          ),
+          child: Icon(
+            Icons.add,
+            size: 22,
+            color: Theme.of(context).colorScheme.onSurface,
+          ),
+        ),
+      ),
     );
   }
 }
@@ -479,451 +580,6 @@ class _ModeButton extends StatelessWidget {
               ),
         ),
       ),
-    );
-  }
-}
-
-class _TabPill extends StatelessWidget {
-  const _TabPill({
-    required this.label,
-    required this.isActive,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool isActive;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: isActive
-              ? (isDark ? Colors.white : Colors.black)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text(
-          label,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: isActive
-                    ? (isDark ? Colors.black : Colors.white)
-                    : DropColors.muted(context),
-                fontSize: 11,
-                fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
-              ),
-        ),
-      ),
-    );
-  }
-}
-
-class _MetadataCard extends StatelessWidget {
-  const _MetadataCard({required this.dateTime});
-
-  final String dateTime;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Theme.of(context).brightness == Brightness.dark
-            ? Colors.white.withValues(alpha: 0.02)
-            : Colors.black.withValues(alpha: 0.02),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: DropColors.border(context)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text('Date & time', style: Theme.of(context).textTheme.labelSmall),
-          Flexible(
-            child: Text(
-              dateTime,
-              textAlign: TextAlign.end,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    letterSpacing: 0.4,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _HighlightsTab extends StatelessWidget {
-  const _HighlightsTab({
-    required this.highlights,
-    required this.checkedItems,
-    required this.onToggle,
-  });
-
-  final List<String> highlights;
-  final Map<int, bool> checkedItems;
-  final void Function(int index, bool value) onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    final items = highlights;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        OutlinedButton.icon(
-          onPressed: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Mappa mentale — in arrivo')),
-            );
-          },
-          icon: const Icon(Icons.auto_awesome_outlined, size: 16),
-          label: const Text('Genera mappa mentale'),
-          style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            side: BorderSide(color: DropColors.border(context)),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            textStyle: Theme.of(context).textTheme.labelSmall,
-          ),
-        ),
-        const SizedBox(height: 24),
-        Text(
-          'Action items',
-          style: Theme.of(context).textTheme.labelSmall,
-        ),
-        const SizedBox(height: 12),
-        if (items.isEmpty)
-          Text(
-            'Nessun highlight disponibile.',
-            style: Theme.of(context).textTheme.bodyMedium,
-          )
-        else
-          ...List.generate(items.length, (i) {
-          final text = items[i];
-          final checked = checkedItems[i] ?? false;
-
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                GestureDetector(
-                  onTap: () => onToggle(i, !checked),
-                  child: Container(
-                    width: 22,
-                    height: 22,
-                    margin: const EdgeInsets.only(top: 2),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: DropColors.border(context)),
-                      color: checked
-                          ? Theme.of(context).colorScheme.onSurface
-                          : Colors.transparent,
-                    ),
-                    child: checked
-                        ? Icon(
-                            Icons.circle,
-                            size: 8,
-                            color: Theme.of(context).colorScheme.surface,
-                          )
-                        : null,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    text,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontSize: 13,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurface
-                              .withValues(alpha: 0.9),
-                        ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        }),
-      ],
-    );
-  }
-}
-
-class _SummaryTab extends StatelessWidget {
-  const _SummaryTab({required this.note});
-
-  final AudioNote note;
-
-  @override
-  Widget build(BuildContext context) {
-    final summaryText = note.summary.trim();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              'Overview summary',
-              style: Theme.of(context).textTheme.labelSmall,
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                border: Border.all(color: DropColors.border(context)),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                'Meeting template',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      fontSize: 9,
-                    ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        if (summaryText.isEmpty)
-          Text(
-            'Nessun riassunto.',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: DropColors.muted(context),
-                ),
-          )
-        else
-          DropMarkdown(data: summaryText),
-        const SizedBox(height: 8),
-        OutlinedButton.icon(
-          onPressed: summaryText.isEmpty
-              ? null
-              : () async {
-            await Clipboard.setData(ClipboardData(text: summaryText));
-            if (!context.mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Riepilogo copiato negli appunti')),
-            );
-          },
-          icon: const Icon(Icons.upload_outlined, size: 16),
-          label: const Text('COPIA MARKDOWN'),
-          style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            side: BorderSide(color: DropColors.border(context)),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            textStyle: Theme.of(context).textTheme.labelSmall,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _SpeakerViewTab extends StatelessWidget {
-  const _SpeakerViewTab({required this.blocks});
-
-  final List<SpeakerBlock> blocks;
-
-  @override
-  Widget build(BuildContext context) {
-    final displayBlocks = blocks;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            border: Border.all(color: DropColors.border(context)),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Text(
-            'CERCA NELLA TRASCRIZIONE...',
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: DropColors.muted(context),
-                  letterSpacing: 0.8,
-                ),
-          ),
-        ),
-        const SizedBox(height: 20),
-        if (displayBlocks.isEmpty)
-          Text(
-            'Nessun blocco speaker disponibile.',
-            style: Theme.of(context).textTheme.bodyMedium,
-          )
-        else
-          ...displayBlocks.map((block) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 20),
-            child: Container(
-              decoration: BoxDecoration(
-                border: Border(
-                  left: BorderSide(
-                    color: DropColors.muted(context).withValues(alpha: 0.5),
-                  ),
-                ),
-              ),
-              padding: const EdgeInsets.only(left: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        block.speaker,
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: Theme.of(context).colorScheme.onSurface,
-                            ),
-                      ),
-                      if (block.time != null && block.time!.isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        Text(
-                          '[${block.time}]',
-                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                color: DropColors.muted(context),
-                              ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).brightness == Brightness.dark
-                          ? Colors.white.withValues(alpha: 0.06)
-                          : Colors.black.withValues(alpha: 0.04),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: DropColors.border(context)),
-                    ),
-                    child: Text(
-                      block.text,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            fontSize: 13,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurface
-                                .withValues(alpha: 0.9),
-                          ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }),
-      ],
-    );
-  }
-}
-
-class _KeyDataTab extends StatelessWidget {
-  const _KeyDataTab({
-    required this.dateTime,
-    required this.location,
-    required this.participants,
-    required this.tag,
-  });
-
-  final String dateTime;
-  final String location;
-  final List<String> participants;
-  final String tag;
-
-  @override
-  Widget build(BuildContext context) {
-    final displayLocation = location.isNotEmpty ? location : '—';
-    final displayAttendees =
-        participants.isNotEmpty ? participants.join(', ') : '—';
-    final displayTag = tag.isNotEmpty ? tag : '—';
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _MetadataCard(dateTime: dateTime),
-        const SizedBox(height: 16),
-        Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Theme.of(context).brightness == Brightness.dark
-                ? Colors.white.withValues(alpha: 0.02)
-                : Colors.black.withValues(alpha: 0.02),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: DropColors.border(context)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _KeyDataRow(
-                label: 'LOCATION:',
-                value: displayLocation,
-              ),
-              const SizedBox(height: 16),
-              const Divider(height: 1),
-              const SizedBox(height: 16),
-              Text(
-                'ATTENDEES:',
-                style: Theme.of(context).textTheme.labelSmall,
-              ),
-              const SizedBox(height: 6),
-              Text(
-                displayAttendees,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontSize: 13,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-              ),
-              const SizedBox(height: 16),
-              _KeyDataRow(
-                label: 'TAG:',
-                value: displayTag,
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _KeyDataRow extends StatelessWidget {
-  const _KeyDataRow({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: Theme.of(context).textTheme.labelSmall),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            value,
-            textAlign: TextAlign.end,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  letterSpacing: 0.4,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-          ),
-        ),
-      ],
     );
   }
 }

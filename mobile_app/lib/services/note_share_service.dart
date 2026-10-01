@@ -82,10 +82,10 @@ class NoteShareService {
         'raw_transcription': note.rawTranscription,
         'highlights': sd.highlights,
         'key_data': {
-          'location': sd.location,
-          'participants': sd.participants,
-          'tags': note.tag,
+          ...sd.keyDataPayload(),
+          'tags': sd.tagLabel.isNotEmpty ? sd.tagLabel : note.tag,
         },
+        'analysis_state': sd.analysisState,
         'speaker_view': sd.speakerView
             .map(
               (b) => {

@@ -60,6 +60,7 @@ class AudioNote {
     this.analysisPhase,
     this.analysisCurrent = 0,
     this.analysisTotal = 0,
+    this.analysisJobId,
     this.sourceLanguage,
     this.outputLanguage,
   });
@@ -82,6 +83,7 @@ class AudioNote {
   final NoteAnalysisPhase? analysisPhase;
   final int analysisCurrent;
   final int analysisTotal;
+  final String? analysisJobId;
   final String? sourceLanguage;
   final String? outputLanguage;
 
@@ -148,6 +150,8 @@ class AudioNote {
     int? analysisCurrent,
     int? analysisTotal,
     bool clearAnalysisProgress = false,
+    String? analysisJobId,
+    bool clearAnalysisJob = false,
     String? sourceLanguage,
     String? outputLanguage,
   }) {
@@ -175,6 +179,8 @@ class AudioNote {
           clearAnalysisProgress ? 0 : (analysisCurrent ?? this.analysisCurrent),
       analysisTotal:
           clearAnalysisProgress ? 0 : (analysisTotal ?? this.analysisTotal),
+      analysisJobId:
+          clearAnalysisJob ? null : (analysisJobId ?? this.analysisJobId),
       sourceLanguage: sourceLanguage ?? this.sourceLanguage,
       outputLanguage: outputLanguage ?? this.outputLanguage,
     );
@@ -186,14 +192,10 @@ class AudioNote {
       throw const FormatException('Server note missing id');
     }
 
-    var tag = NoteTagsConfig.defaultTags.first;
-    final keyData = data['key_data'];
-    if (keyData is Map<String, dynamic>) {
-      final tagLabel = keyData['tags'] as String?;
-      if (tagLabel != null && tagLabel.isNotEmpty) {
-        tag = NoteTagsConfig.normalizeTag(tagLabel);
-      }
-    }
+    final structured = NoteStructuredData.fromResponse(data);
+    final tag = structured.tagLabel.isNotEmpty
+        ? NoteTagsConfig.normalizeTag(structured.tagLabel)
+        : 'Memo';
 
     final createdAtRaw = data['created_at'] as String?;
     final dateTime = createdAtRaw != null && createdAtRaw.isNotEmpty
@@ -213,7 +215,7 @@ class AudioNote {
       isNew: true,
       tag: tag,
       analysisStatus: NoteAnalysisStatus.ready,
-      structuredData: NoteStructuredData.fromResponse(data),
+      structuredData: structured,
       transcriptSegments:
           TranscriptSegment.listFromResponse(data['transcript_segments']),
       durationSeconds: (data['audio_duration'] as num?)?.round() ?? 0,
@@ -238,7 +240,7 @@ class AudioNote {
           NoteAnalysisStatus.fromString(map['analysis_status'] as String?),
       structuredData: NoteStructuredData.fromJsonString(
         map['structured_json'] as String?,
-      ),
+      ).withLegacySummary(map['summary'] as String? ?? ''),
       uploadSessionId: map['upload_session_id'] as String?,
       uploadedChunks: map['uploaded_chunks'] as int? ?? 0,
       transcriptSegments: TranscriptSegment.listFromJsonString(
@@ -249,6 +251,7 @@ class AudioNote {
       ),
       analysisCurrent: map['analysis_current'] as int? ?? 0,
       analysisTotal: map['analysis_total'] as int? ?? 0,
+      analysisJobId: map['analysis_job_id'] as String?,
       sourceLanguage: map['source_language'] as String?,
       outputLanguage: map['output_language'] as String?,
     );
@@ -275,6 +278,7 @@ class AudioNote {
       'analysis_phase': analysisPhase?.dbValue,
       'analysis_current': analysisCurrent,
       'analysis_total': analysisTotal,
+      'analysis_job_id': analysisJobId,
       'source_language': sourceLanguage,
       'output_language': outputLanguage,
     };
