@@ -26,6 +26,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Lezione'), findsOneWidget);
+    expect(find.text('Summary'), findsOneWidget);
     expect(find.text('Highlights'), findsNothing);
     expect(find.byIcon(Icons.add), findsOneWidget);
 
@@ -61,8 +62,10 @@ void main() {
     );
     await tester.pump();
 
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    expect(find.text('Summary'), findsOneWidget);
+    expect(find.text('Highlights'), findsOneWidget);
+    expect(find.byIcon(Icons.add), findsOneWidget);
+
     await tester.tap(find.text('Highlights'));
     await tester.pump();
 

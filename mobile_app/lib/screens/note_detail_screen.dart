@@ -207,13 +207,11 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
   }
 
   void _goBack() {
-    if (_mode == _DetailMode.sources || _page == _NotesPage.summary) {
-      Navigator.of(context).pop();
+    if (_mode == _DetailMode.notes && _page == _NotesPage.picker) {
+      setState(() => _page = _NotesPage.summary);
       return;
     }
-    setState(() {
-      _page = _page == _NotesPage.picker ? _NotesPage.summary : _NotesPage.picker;
-    });
+    Navigator.of(context).pop();
   }
 
   Future<void> _toggleHighlight(String text, bool checked) async {
@@ -248,7 +246,10 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
         widget.onChanged?.call(updated);
         return;
       }
-      setState(() => _note = updated);
+      setState(() {
+        _note = updated;
+        if (_page == _NotesPage.picker) _page = _pageFor(kind);
+      });
       widget.onChanged?.call(updated);
     } catch (e) {
       if (!mounted) return;
@@ -276,6 +277,8 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
           children: [
             _buildTopBar(context),
             if (_note.isFailed) _buildFailedBanner(context),
+            if (_mode == _DetailMode.notes && _page != _NotesPage.picker)
+              _buildSectionBar(context),
             Expanded(
               child: _mode == _DetailMode.sources
                   ? NoteAudioPlayer(
@@ -400,6 +403,49 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
     );
   }
 
+  Widget _buildSectionBar(BuildContext context) {
+    final data = _note.structuredData;
+    final tabs = <({String label, _NotesPage page})>[
+      if (data.isReady(NoteStructuredData.highlightsKind))
+        (label: 'Highlights', page: _NotesPage.highlights),
+      (label: 'Summary', page: _NotesPage.summary),
+      if (data.isReady(NoteStructuredData.speakersKind))
+        (label: 'Speakers', page: _NotesPage.speakers),
+      if (data.isReady(NoteStructuredData.keyDataKind))
+        (label: 'Key data', page: _NotesPage.keyData),
+    ];
+    final showAdd = !_note.isFailed &&
+        !(data.isReady(NoteStructuredData.highlightsKind) &&
+            data.isReady(NoteStructuredData.speakersKind) &&
+            data.isReady(NoteStructuredData.keyDataKind));
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+      child: Row(
+        children: [
+          for (var i = 0; i < tabs.length; i++) ...[
+            if (i > 0) const SizedBox(width: 8),
+            _TabPill(
+              label: tabs[i].label,
+              isActive: _page == tabs[i].page,
+              onTap: () => setState(() => _page = tabs[i].page),
+            ),
+          ],
+          if (showAdd) ...[
+            const SizedBox(width: 8),
+            _AddPill(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                setState(() => _page = _NotesPage.picker);
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildNotesBody(BuildContext context) {
     if (_page == _NotesPage.picker) {
       return AnalysisPicker(
@@ -429,17 +475,6 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
                   const SizedBox.shrink()
                 else
                   DropMarkdown(data: summary),
-                if (!_note.isFailed) ...[
-                  const SizedBox(height: 36),
-                  Center(
-                    child: _PlusButton(
-                      onTap: () {
-                        HapticFeedback.selectionClick();
-                        setState(() => _page = _NotesPage.picker);
-                      },
-                    ),
-                  ),
-                ],
               ],
             ),
           _NotesPage.highlights => HighlightsSection(
@@ -458,32 +493,66 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
   }
 }
 
-class _PlusButton extends StatelessWidget {
-  const _PlusButton({required this.onTap});
+class _TabPill extends StatelessWidget {
+  const _TabPill({
+    required this.label,
+    required this.isActive,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool isActive;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: isActive
+              ? (isDark ? Colors.white : Colors.black)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          label,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: isActive
+                    ? (isDark ? Colors.black : Colors.white)
+                    : DropColors.muted(context),
+                fontSize: 11,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+              ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AddPill extends StatelessWidget {
+  const _AddPill({required this.onTap});
 
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      shape: const CircleBorder(),
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: onTap,
-        child: Container(
-          width: 56,
-          height: 56,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: DropColors.border(context)),
-          ),
-          child: Icon(
-            Icons.add,
-            size: 22,
-            color: Theme.of(context).colorScheme.onSurface,
-          ),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: DropColors.border(context)),
+        ),
+        child: Icon(
+          Icons.add,
+          size: 16,
+          color: DropColors.muted(context),
         ),
       ),
     );
