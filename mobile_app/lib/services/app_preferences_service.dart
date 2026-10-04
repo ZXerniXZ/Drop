@@ -24,6 +24,7 @@ class AppPreferencesService {
   static const _webGetAppBannerDismissedKey = 'web_get_app_banner_dismissed';
   static const _pendingShareKey = 'pending_share_token';
   static const _tutorialSeenKey = 'tutorial_seen';
+  static const _boundLocalUserKey = 'bound_local_user_id';
 
   static const _secureStorage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
@@ -187,5 +188,28 @@ class AppPreferencesService {
   Future<void> setTutorialSeen() async {
     await init();
     await _store.setBool(_tutorialSeenKey, true);
+  }
+
+  String? boundLocalUserId() {
+    final value = _store.getString(_boundLocalUserKey)?.trim();
+    if (value == null || value.isEmpty) return null;
+    return value;
+  }
+
+  Future<void> setBoundLocalUserId(String userId) async {
+    await init();
+    await _store.setString(_boundLocalUserKey, userId);
+  }
+
+  /// Chiave OpenRouter, modello, lingue, prompt e tag: dati dell'account,
+  /// non del telefono.
+  Future<void> clearAccountScopedPreferences() async {
+    await init();
+    await clearOpenRouterApiKey();
+    await _store.remove(_modelKey);
+    await _store.remove(_languageKey);
+    await _store.remove(_outputLanguageKey);
+    await _store.remove(_promptKey);
+    await _store.remove(_tagsKey);
   }
 }

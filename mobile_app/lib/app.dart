@@ -6,6 +6,7 @@ import 'screens/login_screen.dart';
 import 'screens/recorder_screen.dart';
 import 'services/drop_bootstrap.dart';
 import 'services/legal_acceptance.dart';
+import 'services/root_navigator.dart';
 import 'services/supabase_auth_service.dart';
 import 'theme/drop_motion.dart';
 import 'theme/drop_theme.dart';
@@ -37,6 +38,7 @@ class _DropAppState extends State<DropApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: RootNavigator.key,
       title: 'Drop',
       debugShowCheckedModeBanner: false,
       themeMode: _themeMode,
@@ -65,6 +67,7 @@ class _DropAppState extends State<DropApp> {
             return const AcceptTermsScreen();
           }
           return RecorderScreen(
+            key: ValueKey(session.user.id),
             isDarkMode: _themeMode == ThemeMode.dark,
             onToggleTheme: _toggleTheme,
           );

@@ -13,6 +13,35 @@ class CloudSyncService {
 
   static final CloudSyncService instance = CloudSyncService._();
 
+  /// Id delle note dell'account corrente. Null se il server non risponde:
+  /// in quel caso non si deve buttare la cache locale.
+  Future<Set<String>?> fetchRemoteNoteIds() async {
+    final token = SupabaseAuthService.instance.currentAccessToken;
+    if (token == null || token.isEmpty) return null;
+
+    try {
+      final url = await ApiUrlResolver.resolveEndpoint('/notes');
+      final response = await http.get(
+        Uri.parse(url),
+        headers: DropApiHeaders.auth(token),
+      );
+      if (response.statusCode != 200) return null;
+
+      final body = jsonDecode(response.body);
+      if (body is! List) return null;
+
+      final ids = <String>{};
+      for (final item in body) {
+        if (item is! Map) continue;
+        final id = _remoteNoteId(item);
+        if (id != null) ids.add(id);
+      }
+      return ids;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<int> syncNotesFromServer() async {
     final token = SupabaseAuthService.instance.currentAccessToken;
     if (token == null || token.isEmpty) return 0;
@@ -35,8 +64,8 @@ class CloudSyncService {
       for (final item in body) {
         if (item is! Map<String, dynamic>) continue;
 
-        final remoteId = item['note_id'] as String? ?? item['id'] as String?;
-        if (remoteId == null || remoteId.isEmpty) continue;
+        final remoteId = _remoteNoteId(item);
+        if (remoteId == null) continue;
 
         if (await LocalDatabaseService.instance.isNoteDeleted(remoteId)) {
           await deleteNoteOnServer(remoteId);
@@ -82,4 +111,10 @@ class CloudSyncService {
       await deleteNoteOnServer(noteId);
     }
   }
+}
+
+String? _remoteNoteId(Map item) {
+  final remoteId = item['note_id'] ?? item['id'];
+  if (remoteId is! String || remoteId.isEmpty) return null;
+  return remoteId;
 }

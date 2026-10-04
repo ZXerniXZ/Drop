@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../services/app_identity.dart';
 import '../services/app_preferences_service.dart';
 import '../services/app_update_service.dart';
+import '../services/root_navigator.dart';
 import '../services/web_session.dart';
+import 'banner_close_button.dart';
 
 /// In alto sulla versione web: legge la versione e propone APK o PWA.
 class WebGetAppBanner extends StatefulWidget {
@@ -51,10 +55,9 @@ class _WebGetAppBannerState extends State<WebGetAppBanner> {
     });
   }
 
-  Future<void> _dismiss() async {
-    await AppPreferencesService.instance.setWebGetAppBannerDismissed();
-    if (!mounted) return;
+  void _dismiss() {
     setState(() => _visible = false);
+    unawaited(AppPreferencesService.instance.setWebGetAppBannerDismissed());
   }
 
   Future<void> _installPwa() async {
@@ -63,9 +66,11 @@ class _WebGetAppBannerState extends State<WebGetAppBanner> {
       return;
     }
     if (!mounted) return;
+    final host = RootNavigator.key.currentContext;
+    if (host == null || !host.mounted) return;
     final ios = WebSession.isIosSafari;
     await showDialog<void>(
-      context: context,
+      context: host,
       builder: (context) => AlertDialog(
         title: const Text('Installa la PWA'),
         content: Text(
@@ -95,6 +100,8 @@ class _WebGetAppBannerState extends State<WebGetAppBanner> {
 
     return Material(
       color: const Color(0xFFF5C518),
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.hardEdge,
       child: SafeArea(
         bottom: false,
         child: Padding(
@@ -149,12 +156,9 @@ class _WebGetAppBannerState extends State<WebGetAppBanner> {
                 ),
               ),
               if (!_outdated)
-                IconButton(
+                BannerCloseButton(
                   onPressed: _dismiss,
-                  visualDensity: VisualDensity.compact,
                   color: ink,
-                  icon: const Icon(Icons.close, size: 18),
-                  tooltip: 'Nascondi',
                 ),
             ],
           ),

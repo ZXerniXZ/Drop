@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../services/app_preferences_service.dart';
 import '../services/web_session.dart';
 import '../theme/drop_theme.dart';
+import 'banner_close_button.dart';
 
 class IosInstallBanner extends StatefulWidget {
   const IosInstallBanner({super.key});
@@ -28,10 +31,9 @@ class _IosInstallBannerState extends State<IosInstallBanner> {
     setState(() => _visible = true);
   }
 
-  Future<void> _dismiss() async {
-    await AppPreferencesService.instance.setIosInstallBannerDismissed();
-    if (!mounted) return;
+  void _dismiss() {
     setState(() => _visible = false);
+    unawaited(AppPreferencesService.instance.setIosInstallBannerDismissed());
   }
 
   @override
@@ -69,11 +71,9 @@ class _IosInstallBannerState extends State<IosInstallBanner> {
                   style: theme.textTheme.bodySmall?.copyWith(height: 1.35),
                 ),
               ),
-              IconButton(
+              BannerCloseButton(
                 onPressed: _dismiss,
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.close, size: 18),
-                tooltip: 'Nascondi',
+                color: theme.colorScheme.onSurface,
               ),
             ],
           ),

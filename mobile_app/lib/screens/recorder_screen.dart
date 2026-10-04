@@ -26,6 +26,7 @@ import '../services/audio_binary_store.dart';
 import '../services/audio_recording_config.dart';
 import '../services/cloud_sync_service.dart';
 import '../services/legal_acceptance.dart';
+import '../services/local_account_service.dart';
 import '../services/local_database_service.dart';
 import '../services/note_audio_service.dart';
 import '../services/note_reanalysis_service.dart';
@@ -95,7 +96,6 @@ class _RecorderScreenState extends State<RecorderScreen>
     WidgetsBinding.instance.addObserver(this);
     RecordingForegroundService.addTaskDataCallback(_onForegroundTaskData);
     _loadNotes();
-    _loadTags();
     _loadOrbStyle();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_maybeShowTutorial());
@@ -172,6 +172,15 @@ class _RecorderScreenState extends State<RecorderScreen>
   }
 
   Future<void> _loadNotes() async {
+    final userId = SupabaseAuthService.instance.currentUser?.id;
+    if (userId != null && userId.isNotEmpty) {
+      try {
+        await LocalAccountService.instance.prepareForUser(userId);
+      } catch (error, stack) {
+        debugPrint('account locale: $error\n$stack');
+      }
+    }
+    await _loadTags();
     final notes = await LocalDatabaseService.instance.getAllNotes();
     if (!mounted) return;
     setState(() {

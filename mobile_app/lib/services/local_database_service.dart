@@ -283,4 +283,8 @@ class LocalDatabaseService {
     await _database.delete('audio_notes');
     await _database.delete('deleted_notes');
   }
+
+  Future<void> clearDeletedNotes() async {
+    await _database.delete('deleted_notes');
+  }
 }
