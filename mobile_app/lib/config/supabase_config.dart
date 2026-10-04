@@ -13,7 +13,7 @@ class SupabaseConfig {
   );
 
   static const mobileOauthRedirectUri =
-      'com.drop.plaudclone.drop://login-callback/';
+      'xyz.drop.app://login-callback/';
 
   static const webProductionOrigin = 'https://app.drop-prj.xyz';
 

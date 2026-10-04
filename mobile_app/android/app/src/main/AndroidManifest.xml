@@ -33,7 +33,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
-                    android:scheme="com.drop.plaudclone.drop"
+                    android:scheme="xyz.drop.app"
                     android:host="login-callback" />
             </intent-filter>
         </activity>

@@ -89,11 +89,11 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.drop.plaudclone" "\0"
+            VALUE "CompanyName", "xyz.drop" "\0"
             VALUE "FileDescription", "drop" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "drop" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.drop.plaudclone. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 xyz.drop. All rights reserved." "\0"
             VALUE "OriginalFilename", "drop.exe" "\0"
             VALUE "ProductName", "drop" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"

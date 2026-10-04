@@ -8,7 +8,7 @@
 PRODUCT_NAME = drop
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.drop.plaudclone.drop
+PRODUCT_BUNDLE_IDENTIFIER = xyz.drop.app
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.drop.plaudclone. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 xyz.drop. All rights reserved.

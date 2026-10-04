@@ -38,7 +38,7 @@
 		<dict>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>com.drop.plaudclone.drop</string>
+				<string>xyz.drop.app</string>
 			</array>
 		</dict>
 	</array>

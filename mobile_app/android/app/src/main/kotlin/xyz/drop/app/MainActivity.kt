@@ -1,4 +1,4 @@
-package com.drop.plaudclone.drop
+package xyz.drop.app
 
 import io.flutter.embedding.android.FlutterActivity
 
