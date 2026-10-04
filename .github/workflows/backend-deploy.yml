@@ -39,7 +39,11 @@ jobs:
 
           cd "$BACKEND_DIR"
           docker compose down
-          docker compose up -d --build --wait --wait-timeout 180
+          if ! docker compose up -d --build --wait --wait-timeout 180; then
+            echo "Image build failed. Pruning the Docker builder cache and retrying once."
+            docker builder prune -af
+            docker compose up -d --build --wait --wait-timeout 180
+          fi
 
           docker compose ps
 
