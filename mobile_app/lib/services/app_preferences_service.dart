@@ -91,7 +91,7 @@ class AppPreferencesService {
 
   Future<void> saveAiPreferences(AiPreferences prefs) async {
     await init();
-    await _store.setString(_modelKey, prefs.model.name);
+    await _store.setString(_modelKey, prefs.model.openRouterId);
     await _store.setString(_languageKey, prefs.transcriptionLanguage.id);
     await _store.setString(_outputLanguageKey, prefs.outputLanguage.id);
     await _store.setString(_promptKey, prefs.customPrompt);

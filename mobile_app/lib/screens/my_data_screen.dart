@@ -16,6 +16,7 @@ import '../services/server_quota_service.dart';
 import '../services/supabase_auth_service.dart';
 import '../theme/drop_motion.dart';
 import '../theme/drop_theme.dart';
+import '../widgets/model_picker_sheet.dart';
 import 'record_orb_preview_screen.dart';
 import 'tutorial_screen.dart';
 
@@ -727,11 +728,9 @@ class _AiPreferencesSection extends StatelessWidget {
         children: [
           _FieldLabel(label: 'Modello'),
           const SizedBox(height: 8),
-          _StyledDropdown<AiModel>(
+          ModelPickerField(
             value: prefs.model,
-            items: AiModel.values,
-            labelBuilder: (m) => m.label,
-            onChanged: (v) => onChanged(prefs.copyWith(model: v)),
+            onChanged: (model) => onChanged(prefs.copyWith(model: model)),
           ),
           const SizedBox(height: 14),
           _FieldLabel(label: 'Lingua registrazione'),
