@@ -139,6 +139,7 @@ def build_export_zip(db: Session, user_id: str) -> Path:
             "highlights": note.highlights,
             "key_data": note.key_data,
             "speaker_view": note.speaker_view,
+            "mind_map": note.mind_map or [],
             "transcript_segments": note.transcript_segments or [],
             "audio_duration": note.audio_duration,
             "source_language": note.source_language,

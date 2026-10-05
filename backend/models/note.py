@@ -41,6 +41,9 @@ class NoteDB(Base):
     speaker_view: Mapped[list[dict[str, Any]]] = mapped_column(
         JSON, nullable=False, default=list
     )
+    mind_map: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
     # Timestamp reali di Whisper: [{start, end, text, words: [{w, start, end}]}]
     transcript_segments: Mapped[list[dict[str, Any]]] = mapped_column(
         JSON, nullable=False, default=list
@@ -71,6 +74,8 @@ class NoteDB(Base):
             state.setdefault("highlights", "ready")
         if self.speaker_view:
             state.setdefault("speakers", "ready")
+        if self.mind_map:
+            state.setdefault("mind_map", "ready")
         if _key_data_has_substance(self.key_data):
             state.setdefault("key_data", "ready")
         return state
@@ -87,6 +92,7 @@ class NoteDB(Base):
             "highlights": self.highlights,
             "key_data": self.key_data,
             "speaker_view": self.speaker_view,
+            "mind_map": self.mind_map or [],
             "analysis_state": self.effective_analysis_state(),
             "transcript_segments": self.transcript_segments or [],
             "audio_duration": self.audio_duration,

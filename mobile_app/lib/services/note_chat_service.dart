@@ -69,6 +69,7 @@ class NoteChatService {
         ...sd.keyDataPayload(),
         'tags': note.tag,
       },
+      'mind_map': sd.mindMap.map((node) => node.toMap()).toList(),
       'speaker_view': sd.speakerView
           .map(
             (b) => {

@@ -32,6 +32,8 @@ import '../services/note_audio_service.dart';
 import '../services/note_reanalysis_service.dart';
 import '../services/note_share_service.dart';
 import '../services/recording_clock.dart';
+import '../services/processing_foreground_service.dart';
+import '../services/processing_notification.dart';
 import '../services/recording_foreground_service.dart';
 import '../services/server_quota_service.dart';
 import '../services/supabase_auth_service.dart';
@@ -265,6 +267,9 @@ class _RecorderScreenState extends State<RecorderScreen>
     int current = 0,
     int total = 0,
   }) async {
+    unawaited(
+      ProcessingForegroundService.update(processingNotificationText(phase)),
+    );
     final index = _notes.indexWhere((n) => n.id == noteId);
     if (index == -1) return;
 
@@ -745,6 +750,9 @@ class _RecorderScreenState extends State<RecorderScreen>
   }) async {
     if (!_watchingNoteIds.add(note.id)) return;
     var handedOff = false;
+    await ProcessingForegroundService.acquire(
+      processingNotificationText(note.analysisPhase),
+    );
     try {
       var jobId = note.analysisJobId;
       if (jobId == null || jobId.isEmpty) {
@@ -808,6 +816,7 @@ class _RecorderScreenState extends State<RecorderScreen>
       if (!mounted) return;
       _updateNoteInList(failed);
     } finally {
+      await ProcessingForegroundService.release();
       if (!handedOff) _watchingNoteIds.remove(note.id);
     }
   }
@@ -818,6 +827,9 @@ class _RecorderScreenState extends State<RecorderScreen>
     required int durationSeconds,
   }) async {
     if (!_watchingNoteIds.add(noteId)) return;
+    await ProcessingForegroundService.acquire(
+      processingNotificationText(NoteAnalysisPhase.uploading),
+    );
     try {
       final prefs = await AppPreferencesService.instance.loadAiPreferences();
       final tagsConfig = await AppPreferencesService.instance.loadNoteTags();
@@ -968,6 +980,7 @@ class _RecorderScreenState extends State<RecorderScreen>
       if (!mounted) return;
       _updateNoteInList(failed);
     } finally {
+      await ProcessingForegroundService.release();
       _watchingNoteIds.remove(noteId);
     }
   }
@@ -1551,6 +1564,9 @@ class _RecorderScreenState extends State<RecorderScreen>
     if (!mounted) return;
     _updateNoteInList(processing);
 
+    await ProcessingForegroundService.acquire(
+      processingNotificationText(NoteAnalysisPhase.transcribing),
+    );
     try {
       final apiKey = await AppPreferencesService.instance.loadOpenRouterApiKey();
       final jobId = await NoteReanalysisService.instance.requestReanalysis(
@@ -1619,6 +1635,8 @@ class _RecorderScreenState extends State<RecorderScreen>
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Rianalisi fallita: $e')));
+    } finally {
+      await ProcessingForegroundService.release();
     }
   }
 

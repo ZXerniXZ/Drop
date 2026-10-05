@@ -170,6 +170,7 @@ def _save_note_to_db(
             existing.highlights = processed["highlights"]
             existing.key_data = processed["key_data"]
             existing.speaker_view = processed["speaker_view"]
+            existing.mind_map = processed.get("mind_map") or []
             existing.analysis_state = processed.get("analysis_state") or {}
             existing.transcript_segments = segments
             existing.audio_duration = audio_duration
@@ -192,6 +193,7 @@ def _save_note_to_db(
             highlights=processed["highlights"],
             key_data=processed["key_data"],
             speaker_view=processed["speaker_view"],
+            mind_map=processed.get("mind_map") or [],
             analysis_state=processed.get("analysis_state") or {},
             transcript_segments=segments,
             audio_duration=audio_duration,
@@ -292,6 +294,7 @@ async def run_upload_job(
             "highlights": processed["highlights"],
             "key_data": processed["key_data"],
             "speaker_view": processed["speaker_view"],
+            "mind_map": processed.get("mind_map") or [],
             "analysis_state": processed.get("analysis_state") or {},
             "transcript_segments": transcript_segments,
             "audio_duration": audio_duration,
@@ -394,6 +397,9 @@ def _merge_optional_analysis(
         elif kind == "key_data":
             note.key_data = processed.get("key_data") or {}
             state["key_data"] = "ready"
+        elif kind == "mind_map":
+            note.mind_map = processed.get("mind_map") or []
+            state["mind_map"] = "ready"
         note.analysis_state = state
         db.add(note)
         db.commit()

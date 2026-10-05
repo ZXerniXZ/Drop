@@ -39,6 +39,7 @@ class NoteContext(BaseModel):
     highlights: list[str] = Field(default_factory=list)
     key_data: dict[str, Any] = Field(default_factory=dict)
     speaker_view: list[dict[str, Any]] = Field(default_factory=list)
+    mind_map: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class NoteChatRequest(BaseModel):
@@ -57,6 +58,26 @@ def _truncate_transcript(text: str) -> str:
     tail = text[-HEAD_TAIL_CHARS:]
     omitted = len(text) - HEAD_TAIL_CHARS * 2
     return f"{head}\n\n[... {omitted} caratteri omessi ...]\n\n{tail}"
+
+
+def _mind_map_outline(nodes: list[dict[str, Any]], depth: int = 0) -> str:
+    lines: list[str] = []
+    indent = "  " * depth
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        title = str(node.get("title") or "").strip()
+        body = str(node.get("body") or "").strip()
+        if title:
+            lines.append(f"{indent}- {title}")
+        if body:
+            lines.append(f"{indent}  {body}")
+        children = node.get("children")
+        if isinstance(children, list) and children and depth < 3:
+            nested = _mind_map_outline(children, depth + 1)
+            if nested:
+                lines.append(nested)
+    return "\n".join(lines)
 
 
 def _build_note_context_block(ctx: NoteContext) -> str:
@@ -83,6 +104,11 @@ def _build_note_context_block(ctx: NoteContext) -> str:
     if ctx.highlights:
         bullets = "\n".join(f"- {h}" for h in ctx.highlights)
         parts.append(f"\n## Highlights\n{bullets}")
+
+    if ctx.mind_map:
+        outline = _mind_map_outline(ctx.mind_map)
+        if outline:
+            parts.append(f"\n## Mind map\n{outline}")
 
     if ctx.speaker_view:
         blocks = []

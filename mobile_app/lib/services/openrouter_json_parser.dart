@@ -166,6 +166,7 @@ Map<String, dynamic> parseLlmAnalysisJson(
       'decisions': <String>[],
     },
     'speaker_view': <Map<String, String>>[],
+    'mind_map': <Map<String, dynamic>>[],
     'formatted_transcript': transcript.isNotEmpty ? transcript : summary,
     'analysis_state': <String, String>{},
   };

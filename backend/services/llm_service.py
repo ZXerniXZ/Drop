@@ -41,7 +41,7 @@ MODEL_ALIASES: dict[str, str] = {
     "google/gemini-2.5-pro": "google/gemini-2.5-pro",
 }
 
-ANALYSIS_KINDS = ("highlights", "speakers", "key_data")
+ANALYSIS_KINDS = ("highlights", "speakers", "key_data", "mind_map")
 
 BRIEF_SYSTEM_PROMPT = """You are the assistant for a voice-notes app.
 Read the transcript and return ONLY a valid JSON object with this exact schema:
@@ -113,6 +113,29 @@ Rules:
 - key_data.tags MUST be one of the allowed tags.
 - Reply with JSON only, no markdown fences or extra text."""
 
+MIND_MAP_SYSTEM_PROMPT = """You turn a voice-note transcript into a mind map.
+Return ONLY a valid JSON object:
+
+{{
+  "mind_map": [
+    {{
+      "title": "short node title",
+      "body": "explanation shown when the title is opened",
+      "children": []
+    }}
+  ]
+}}
+
+Rules:
+- Write every title and body in {output_language}.
+- The map is a tree. The preview shows titles. The body appears only when a title is opened.
+- title: one line, max 60 characters, no math, no markdown.
+- body: the explanation of that title. Plain prose. Use $...$ for inline math and $$...$$ for a formula on its own line. No other math delimiters.
+- children: nested points with the same shape. Depth at most 3. Use [] when a point has no children.
+- 3 to 10 top-level points. Follow what was actually said. Do not invent facts.
+- A point may have an empty body when it only groups its children.
+- Reply with JSON only, no markdown fences or extra text."""
+
 DEFAULT_TAGS = [
     "Meeting",
     "Lezione",
@@ -157,6 +180,12 @@ def _build_highlights_system_prompt(*, output_language: str | None = None) -> st
 
 def _build_speakers_system_prompt() -> str:
     return SPEAKERS_SYSTEM_PROMPT
+
+
+def _build_mind_map_system_prompt(*, output_language: str | None = None) -> str:
+    return MIND_MAP_SYSTEM_PROMPT.format(
+        output_language=_language_label(output_language)
+    )
 
 
 def _build_key_data_system_prompt(
@@ -252,6 +281,51 @@ def _normalize_key_data(
         "figures": _as_fact_list(value.get("figures"), "value", "what"),
         "decisions": _as_string_list(value.get("decisions"))[:8],
     }
+
+
+_MAX_MIND_NODES = 40
+_MAX_MIND_DEPTH = 3
+
+
+def _normalize_mind_map(value: Any) -> list[dict[str, Any]]:
+    count = 0
+
+    def walk(raw: Any, depth: int) -> list[dict[str, Any]]:
+        nonlocal count
+        if not isinstance(raw, list) or depth > _MAX_MIND_DEPTH:
+            return []
+        nodes: list[dict[str, Any]] = []
+        for item in raw:
+            if count >= _MAX_MIND_NODES:
+                break
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip()
+            body = str(
+                item.get("body") or item.get("explanation") or item.get("detail") or ""
+            ).strip()
+            if not title and not body:
+                continue
+            if not title:
+                title = body.split("\n", 1)[0][:60]
+            count += 1
+            children = (
+                walk(item.get("children") or item.get("nodes"), depth + 1)
+                if depth < _MAX_MIND_DEPTH
+                else []
+            )
+            nodes.append(
+                {
+                    "title": title[:80],
+                    "body": body[:2000],
+                    "children": children,
+                }
+            )
+        return nodes
+
+    if isinstance(value, dict):
+        value = value.get("mind_map") or value.get("nodes")
+    return walk(value, 1)
 
 
 def _with_custom_prompt(prompt: str, custom_prompt: str | None) -> str:
@@ -360,6 +434,7 @@ async def process_transcript(
         "key_data": empty_key_data(),
         "speaker_view": [],
         "formatted_transcript": transcript,
+        "mind_map": [],
         "analysis_state": {},
     }
 
@@ -422,6 +497,18 @@ async def process_optional_analysis(
             "speaker_view": speaker_view,
             "formatted_transcript": formatted or transcript,
         }
+
+    if kind == "mind_map":
+        data = await _complete_json(
+            system=_build_mind_map_system_prompt(output_language=language),
+            user=_with_custom_prompt(
+                f"Write every title and body in {label}.\n\nTrascrizione:\n\n{clipped}",
+                custom_prompt,
+            ),
+            model=model,
+            api_key=api_key,
+        )
+        return {"mind_map": _normalize_mind_map(data.get("mind_map"))}
 
     data = await _complete_json(
         system=_build_key_data_system_prompt(

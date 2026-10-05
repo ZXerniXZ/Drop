@@ -13,13 +13,14 @@ import '../widgets/note_detail/analysis_picker.dart';
 import '../widgets/note_detail/ask_ai_bar.dart';
 import '../widgets/note_detail/highlights_section.dart';
 import '../widgets/note_detail/key_data_section.dart';
+import '../widgets/note_detail/mind_map_section.dart';
 import '../widgets/note_detail/note_chat_sheet.dart';
 import '../widgets/note_detail/note_audio_player.dart';
 import '../widgets/note_detail/speakers_section.dart';
 
 enum _DetailMode { sources, notes }
 
-enum _NotesPage { summary, picker, highlights, speakers, keyData }
+enum _NotesPage { summary, picker, highlights, speakers, keyData, mindMap }
 
 class NoteDetailScreen extends StatefulWidget {
   const NoteDetailScreen({
@@ -265,6 +266,7 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
     return switch (kind) {
       NoteStructuredData.speakersKind => _NotesPage.speakers,
       NoteStructuredData.keyDataKind => _NotesPage.keyData,
+      NoteStructuredData.mindMapKind => _NotesPage.mindMap,
       _ => _NotesPage.highlights,
     };
   }
@@ -406,6 +408,8 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
   Widget _buildSectionBar(BuildContext context) {
     final data = _note.structuredData;
     final tabs = <({String label, _NotesPage page})>[
+      if (data.isReady(NoteStructuredData.mindMapKind))
+        (label: 'Mind map', page: _NotesPage.mindMap),
       if (data.isReady(NoteStructuredData.highlightsKind))
         (label: 'Highlights', page: _NotesPage.highlights),
       (label: 'Summary', page: _NotesPage.summary),
@@ -417,7 +421,8 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
     final showAdd = !_note.isFailed &&
         !(data.isReady(NoteStructuredData.highlightsKind) &&
             data.isReady(NoteStructuredData.speakersKind) &&
-            data.isReady(NoteStructuredData.keyDataKind));
+            data.isReady(NoteStructuredData.keyDataKind) &&
+            data.isReady(NoteStructuredData.mindMapKind));
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -486,6 +491,9 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
               blocks: _note.structuredData.speakerView,
             ),
           _NotesPage.keyData => KeyDataSection(data: _note.structuredData),
+          _NotesPage.mindMap => MindMapSection(
+              nodes: _note.structuredData.mindMap,
+            ),
           _NotesPage.picker => const SizedBox.shrink(),
         },
       ],

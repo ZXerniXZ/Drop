@@ -330,11 +330,35 @@ class OpenRouterClient {
       }
     }
 
+    final mindMap = ctx['mind_map'];
+    if (mindMap is List && mindMap.isNotEmpty) {
+      final outline = _mindMapOutline(mindMap);
+      if (outline.isNotEmpty) parts.add('\n## Mind map\n$outline');
+    }
+
     if (transcript.trim().isNotEmpty) {
       parts.add('\n## Trascrizione\n${transcript.trim()}');
     }
 
     return parts.join('\n');
+  }
+
+  String _mindMapOutline(List<dynamic> nodes, [int depth = 0]) {
+    final lines = <String>[];
+    final indent = '  ' * depth;
+    for (final node in nodes) {
+      if (node is! Map) continue;
+      final title = node['title']?.toString().trim() ?? '';
+      final body = node['body']?.toString().trim() ?? '';
+      if (title.isNotEmpty) lines.add('$indent- $title');
+      if (body.isNotEmpty) lines.add('$indent  $body');
+      final children = node['children'];
+      if (children is List && children.isNotEmpty && depth < 3) {
+        final nested = _mindMapOutline(children, depth + 1);
+        if (nested.isNotEmpty) lines.add(nested);
+      }
+    }
+    return lines.join('\n');
   }
 
   List<Map<String, String>> _buildChatMessages({
@@ -502,6 +526,7 @@ class OpenRouterClient {
         ...sd.keyDataPayload(),
         'tags': note.tag,
       },
+      'mind_map': sd.mindMap.map((node) => node.toMap()).toList(),
       'speaker_view': sd.speakerView
           .map(
             (b) => {

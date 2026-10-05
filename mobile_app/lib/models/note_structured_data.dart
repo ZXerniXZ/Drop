@@ -52,6 +52,43 @@ class NoteFact {
       };
 }
 
+class MindMapNode {
+  const MindMapNode({
+    required this.title,
+    this.body = '',
+    this.children = const [],
+  });
+
+  final String title;
+  final String body;
+  final List<MindMapNode> children;
+
+  bool get opens => body.trim().isNotEmpty || children.isNotEmpty;
+
+  factory MindMapNode.fromMap(Map<String, dynamic> map) {
+    final rawChildren = map['children'] ?? map['nodes'];
+    final children = rawChildren is List
+        ? rawChildren
+            .whereType<Map>()
+            .map((item) => MindMapNode.fromMap(Map<String, dynamic>.from(item)))
+            .where((node) => node.title.isNotEmpty || node.body.isNotEmpty)
+            .toList()
+        : const <MindMapNode>[];
+    final title = map['title']?.toString().trim() ?? '';
+    final body = (map['body'] ?? map['explanation'] ?? map['detail'])
+            ?.toString()
+            .trim() ??
+        '';
+    return MindMapNode(title: title, body: body, children: children);
+  }
+
+  Map<String, dynamic> toMap() => {
+        'title': title,
+        'body': body,
+        'children': children.map((node) => node.toMap()).toList(),
+      };
+}
+
 class NoteStructuredData {
   const NoteStructuredData({
     this.highlights = const [],
@@ -62,6 +99,7 @@ class NoteStructuredData {
     this.figures = const [],
     this.decisions = const [],
     this.speakerView = const [],
+    this.mindMap = const [],
     this.analysisState = const {},
     this.checkedHighlights = const [],
   });
@@ -69,6 +107,7 @@ class NoteStructuredData {
   static const highlightsKind = 'highlights';
   static const speakersKind = 'speakers';
   static const keyDataKind = 'key_data';
+  static const mindMapKind = 'mind_map';
 
   final List<String> highlights;
   final String location;
@@ -78,6 +117,7 @@ class NoteStructuredData {
   final List<NoteFact> figures;
   final List<String> decisions;
   final List<SpeakerBlock> speakerView;
+  final List<MindMapNode> mindMap;
   final Map<String, String> analysisState;
   final List<String> checkedHighlights;
 
@@ -116,6 +156,7 @@ class NoteStructuredData {
     List<NoteFact>? figures,
     List<String>? decisions,
     List<SpeakerBlock>? speakerView,
+    List<MindMapNode>? mindMap,
     Map<String, String>? analysisState,
     List<String>? checkedHighlights,
   }) {
@@ -128,6 +169,7 @@ class NoteStructuredData {
       figures: figures ?? this.figures,
       decisions: decisions ?? this.decisions,
       speakerView: speakerView ?? this.speakerView,
+      mindMap: mindMap ?? this.mindMap,
       analysisState: analysisState ?? this.analysisState,
       checkedHighlights: checkedHighlights ?? this.checkedHighlights,
     );
@@ -188,6 +230,15 @@ class NoteStructuredData {
             .toList()
         : <String>[];
 
+    final mindRaw = data['mind_map'];
+    final mindMap = mindRaw is List
+        ? mindRaw
+            .whereType<Map>()
+            .map((item) => MindMapNode.fromMap(Map<String, dynamic>.from(item)))
+            .where((node) => node.title.isNotEmpty || node.body.isNotEmpty)
+            .toList()
+        : <MindMapNode>[];
+
     return NoteStructuredData(
       highlights: highlights,
       location: location,
@@ -197,11 +248,13 @@ class NoteStructuredData {
       figures: figures,
       decisions: decisions,
       speakerView: speakerView,
+      mindMap: mindMap,
       analysisState: _analysisState(
         data,
         summary: data['summary']?.toString() ?? '',
         highlights: highlights,
         speakerView: speakerView,
+        mindMap: mindMap,
         hasSubstance: location.isNotEmpty ||
             participants.isNotEmpty ||
             deadlines.isNotEmpty ||
@@ -234,6 +287,7 @@ class NoteStructuredData {
         'decisions': decisions,
       },
       'speaker_view': speakerView.map((b) => b.toMap()).toList(),
+      'mind_map': mindMap.map((node) => node.toMap()).toList(),
       'analysis_state': analysisState,
       'checked_highlights': checkedHighlights,
     });
@@ -267,6 +321,7 @@ class NoteStructuredData {
     required String summary,
     required List<String> highlights,
     required List<SpeakerBlock> speakerView,
+    required List<MindMapNode> mindMap,
     required bool hasSubstance,
   }) {
     final state = <String, String>{};
@@ -288,6 +343,9 @@ class NoteStructuredData {
     }
     if (speakerView.isNotEmpty) {
       state.putIfAbsent(speakersKind, () => 'ready');
+    }
+    if (mindMap.isNotEmpty) {
+      state.putIfAbsent(mindMapKind, () => 'ready');
     }
     if (hasSubstance) {
       state.putIfAbsent(keyDataKind, () => 'ready');

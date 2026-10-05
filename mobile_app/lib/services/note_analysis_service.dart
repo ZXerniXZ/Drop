@@ -10,6 +10,7 @@ import 'api_url_resolver.dart';
 import 'app_preferences_service.dart';
 import 'drop_api_headers.dart';
 import 'local_database_service.dart';
+import 'processing_foreground_service.dart';
 import 'server_quota_service.dart';
 import 'supabase_auth_service.dart';
 
@@ -38,6 +39,10 @@ class NoteAnalysisService {
     final url = await ApiUrlResolver.resolveEndpoint(
       '/notes/${note.id}/analyses/$kind',
     );
+    await ProcessingForegroundService.acquire(
+      kind == 'mind_map' ? 'Mappa mentale in corso' : 'Analisi in corso',
+    );
+    try {
     final response = await http.post(
       Uri.parse(url),
       headers: DropApiHeaders.json(token),
@@ -68,11 +73,14 @@ class NoteAnalysisService {
       throw Exception('Risposta server senza job_id');
     }
 
-    final result = await _poll(jobId, token);
-    final fresh = await LocalDatabaseService.instance.getNote(note.id) ?? note;
-    final updated = mergeAnalysisResult(fresh, result);
-    await LocalDatabaseService.instance.saveNote(updated);
-    return updated;
+      final result = await _poll(jobId, token);
+      final fresh = await LocalDatabaseService.instance.getNote(note.id) ?? note;
+      final updated = mergeAnalysisResult(fresh, result);
+      await LocalDatabaseService.instance.saveNote(updated);
+      return updated;
+    } finally {
+      await ProcessingForegroundService.release();
+    }
   }
 
   Future<Map<String, dynamic>> _poll(String jobId, String accessToken) async {

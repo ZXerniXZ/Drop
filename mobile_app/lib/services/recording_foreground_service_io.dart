@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
+import 'processing_foreground_service.dart';
 import 'recording_clock.dart';
 
 const int recordingForegroundServiceId = 256;
@@ -82,6 +83,8 @@ class RecordingForegroundService {
 
   static bool get isSupported => Platform.isAndroid;
 
+  static bool _recordingActive = false;
+
   static Future<void> init() async {
     FlutterForegroundTask.initCommunicationPort();
     if (!isSupported) return;
@@ -130,12 +133,15 @@ class RecordingForegroundService {
     if (!isSupported) return true;
 
     await requestPermissions();
+    await init();
+    final yielded = await ProcessingForegroundService.suspendForRecording();
 
-    if (await FlutterForegroundTask.isRunningService) {
+    if (!yielded && await FlutterForegroundTask.isRunningService) {
       await FlutterForegroundTask.updateService(
         notificationTitle: recordingNotificationTitle,
         notificationText: elapsedLabel,
       );
+      _recordingActive = true;
       return true;
     }
 
@@ -150,7 +156,12 @@ class RecordingForegroundService {
       callback: recordingServiceCallback,
     );
 
-    return result is ServiceRequestSuccess;
+    if (result is! ServiceRequestSuccess) {
+      await ProcessingForegroundService.resumeAfterRecording();
+      return false;
+    }
+    _recordingActive = true;
+    return true;
   }
 
   /// Invia l'ancora dell'orologio al servizio. La notifica calcola i secondi
@@ -170,7 +181,14 @@ class RecordingForegroundService {
 
   static Future<void> stop() async {
     if (!isSupported) return;
-    if (!await FlutterForegroundTask.isRunningService) return;
-    await FlutterForegroundTask.stopService();
+    if (!_recordingActive) {
+      await ProcessingForegroundService.resumeAfterRecording();
+      return;
+    }
+    _recordingActive = false;
+    if (await FlutterForegroundTask.isRunningService) {
+      await FlutterForegroundTask.stopService();
+    }
+    await ProcessingForegroundService.resumeAfterRecording();
   }
 }

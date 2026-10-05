@@ -86,6 +86,7 @@ class NoteShareService {
           'tags': sd.tagLabel.isNotEmpty ? sd.tagLabel : note.tag,
         },
         'analysis_state': sd.analysisState,
+        'mind_map': sd.mindMap.map((node) => node.toMap()).toList(),
         'speaker_view': sd.speakerView
             .map(
               (b) => {

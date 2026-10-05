@@ -30,6 +30,7 @@ class _Mark {
     required this.ax,
     required this.ay,
     required this.phase,
+    this.illustrated = true,
   });
 
   final String kind;
@@ -38,32 +39,42 @@ class _Mark {
   final double ax;
   final double ay;
   final double phase;
+  final bool illustrated;
 }
 
 const _marks = <_Mark>[
   _Mark(
+    kind: NoteStructuredData.mindMapKind,
+    label: 'Mind map',
+    size: 128,
+    ax: 0.26,
+    ay: 0.20,
+    phase: 0.2,
+    illustrated: false,
+  ),
+  _Mark(
     kind: NoteStructuredData.highlightsKind,
     label: 'Highlights',
-    size: 156,
-    ax: 0.30,
-    ay: 0.24,
-    phase: 0.4,
+    size: 136,
+    ax: 0.74,
+    ay: 0.26,
+    phase: 1.1,
   ),
   _Mark(
     kind: NoteStructuredData.speakersKind,
     label: 'Speakers',
-    size: 176,
-    ax: 0.70,
-    ay: 0.46,
-    phase: 1.7,
+    size: 148,
+    ax: 0.28,
+    ay: 0.72,
+    phase: 2.2,
   ),
   _Mark(
     kind: NoteStructuredData.keyDataKind,
     label: 'Key data',
-    size: 140,
-    ax: 0.36,
+    size: 124,
+    ax: 0.76,
     ay: 0.74,
-    phase: 2.8,
+    phase: 3.1,
   ),
 ];
 
@@ -183,15 +194,21 @@ class _AnalysisPickerState extends State<AnalysisPicker>
                     child: ClipOval(
                       child: Opacity(
                         opacity: ready ? 1 : 0.55,
-                        child: Image.asset(
-                          'assets/analyses/${mark.kind}_${isDark ? 'dark' : 'light'}.jpg',
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => Icon(
-                            _fallbackIcon(mark.kind),
-                            size: mark.size * 0.34,
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
-                        ),
+                        child: mark.illustrated
+                            ? Image.asset(
+                                'assets/analyses/${mark.kind}_${isDark ? 'dark' : 'light'}.jpg',
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, _, _) => Icon(
+                                  _fallbackIcon(mark.kind),
+                                  size: mark.size * 0.34,
+                                  color: Theme.of(context).colorScheme.onSurface,
+                                ),
+                              )
+                            : Icon(
+                                _fallbackIcon(mark.kind),
+                                size: mark.size * 0.34,
+                                color: Theme.of(context).colorScheme.onSurface,
+                              ),
                       ),
                     ),
                   ),
@@ -226,6 +243,7 @@ class _AnalysisPickerState extends State<AnalysisPicker>
 
   IconData _fallbackIcon(String kind) {
     return switch (kind) {
+      NoteStructuredData.mindMapKind => Icons.account_tree_outlined,
       NoteStructuredData.speakersKind => Icons.record_voice_over_outlined,
       NoteStructuredData.keyDataKind => Icons.grid_view_rounded,
       _ => Icons.checklist_rounded,
