@@ -380,7 +380,7 @@ In GitHub → Settings → Secrets and variables → Actions aggiorna:
 
 Poi rebuild APK e PWA (push su `main` o workflow). L'UI di login non cambia.
 
-Redirect ammessi da GoTrue (`GOTRUE_URI_ALLOW_LIST`): PWA `https://app.drop-prj.xyz/**`, localhost, schema mobile `xyz.drop.app://**` (resta accettato anche `com.drop.plaudclone.drop://**`).
+Redirect ammessi da GoTrue (`GOTRUE_URI_ALLOW_LIST`): PWA `https://app.drop-prj.xyz/**`, localhost, e il ritorno dell'app `xyz.drop.app://login-callback/**`. Se quel callback non è in lista, dopo Google il browser finisce su `SITE_URL` (la web app).
 
 ### 5. Account già esistenti (remap `user_id`)
 
