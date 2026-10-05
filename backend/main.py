@@ -101,6 +101,7 @@ class NoteReanalyzeRequest(BaseModel):
     output_language: str | None = None
     custom_prompt: str | None = None
     available_tags: list[str] | None = None
+    noise_reduction: bool | None = None
     openrouter_api_key: str | None = Field(default=None, max_length=256)
 
 
@@ -113,6 +114,7 @@ class AnalyzeUploadRequest(BaseModel):
     custom_prompt: str | None = None
     available_tags: list[str] | None = None
     duration_seconds: float | None = Field(default=None, ge=0)
+    noise_reduction: bool | None = None
     openrouter_api_key: str | None = Field(default=None, max_length=256)
 
 
@@ -146,6 +148,7 @@ class UploadSessionCreate(BaseModel):
     available_tags: list[str] | None = None
     duration_seconds: float | None = Field(default=None, ge=0)
     defer_analysis: bool = False
+    noise_reduction: bool = False
 
 
 @app.on_event("startup")
@@ -153,6 +156,24 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     ensure_schema()
     cleanup_expired_sessions()
+
+
+def _as_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
+def _noise_reduction_flag(explicit: bool | None, metadata: dict[str, Any] | None) -> bool:
+    if explicit is not None:
+        return explicit
+    if not metadata:
+        return False
+    return _as_bool(metadata.get("noise_reduction"))
 
 
 def _parse_tags_list(available_tags: str | None) -> list[str] | None:
@@ -178,6 +199,7 @@ def _metadata_from_body(body: UploadSessionCreate) -> dict[str, Any]:
         "available_tags": body.available_tags,
         "duration_seconds": body.duration_seconds,
         "defer_analysis": body.defer_analysis,
+        "noise_reduction": body.noise_reduction,
     }
 
 
@@ -212,6 +234,7 @@ def _start_analysis_job(
     available_tags: list[str] | None,
     estimated_seconds: float | None,
     openrouter_api_key: str | None = None,
+    noise_reduction: bool = False,
 ) -> str:
     job_id = str(uuid.uuid4())
     start_upload_job(
@@ -228,13 +251,16 @@ def _start_analysis_job(
         source_language=source_language,
         output_language=output_language,
         openrouter_api_key=openrouter_api_key,
+        noise_reduction=noise_reduction,
     )
     return job_id
 
 
-async def _detect_owned_audio(file_path: str) -> dict[str, Any]:
+async def _detect_owned_audio(
+    file_path: str, *, denoise: bool = False
+) -> dict[str, Any]:
     try:
-        detected = await detect_language_from_audio(file_path)
+        detected = await detect_language_from_audio(file_path, denoise=denoise)
     except Exception:
         detected = None
     return {
@@ -365,6 +391,7 @@ async def complete_upload_session(
         custom_prompt=metadata.get("custom_prompt"),
         available_tags=metadata.get("available_tags"),
         estimated_seconds=metadata.get("duration_seconds"),
+        noise_reduction=_as_bool(metadata.get("noise_reduction")),
     )
     return {
         "success": True,
@@ -397,6 +424,7 @@ async def upload_audio(
     note_id: str | None = Form(default=None),
     duration_seconds: float | None = Form(default=None),
     defer_analysis: bool = Form(default=False),
+    noise_reduction: str | None = Form(default=None),
 ):
     if not defer_analysis:
         raise_if_cannot_accept(current_user_id, duration_seconds)
@@ -428,6 +456,7 @@ async def upload_audio(
         "available_tags": _parse_tags_list(available_tags),
         "duration_seconds": duration_seconds,
         "defer_analysis": defer_analysis,
+        "noise_reduction": _as_bool(noise_reduction),
     }
     session = register_completed_upload(
         user_id=current_user_id,
@@ -458,6 +487,7 @@ async def upload_audio(
         custom_prompt=custom_prompt,
         available_tags=_parse_tags_list(available_tags),
         estimated_seconds=duration_seconds,
+        noise_reduction=_as_bool(noise_reduction),
     )
 
     return {
@@ -610,6 +640,7 @@ async def reanalyze_note(
         available_tags=body.available_tags,
         estimated_seconds=note.audio_duration,
         openrouter_api_key=body.openrouter_api_key,
+        noise_reduction=_noise_reduction_flag(body.noise_reduction, None),
     )
     return {
         "success": True,
@@ -622,12 +653,18 @@ async def reanalyze_note(
 @app.post("/upload-audio/sessions/{upload_id}/detect-language")
 async def detect_upload_language(
     upload_id: str,
+    noise_reduction: str | None = None,
     current_user_id: str = Depends(get_current_user),
 ):
-    _saved_name, file_path, _metadata = get_owned_assembled(
+    _saved_name, file_path, metadata = get_owned_assembled(
         upload_id, user_id=current_user_id
     )
-    return await _detect_owned_audio(file_path)
+    denoise = (
+        _as_bool(noise_reduction)
+        if noise_reduction is not None
+        else _as_bool(metadata.get("noise_reduction"))
+    )
+    return await _detect_owned_audio(file_path, denoise=denoise)
 
 
 @app.post("/upload-audio/sessions/{upload_id}/analyze")
@@ -657,6 +694,9 @@ async def analyze_uploaded_audio(
         available_tags=body.available_tags or metadata.get("available_tags"),
         estimated_seconds=duration,
         openrouter_api_key=body.openrouter_api_key,
+        noise_reduction=_noise_reduction_flag(
+            body.noise_reduction, metadata
+        ),
     )
     return {
         "success": True,
@@ -670,6 +710,7 @@ async def analyze_uploaded_audio(
 @app.post("/notes/{note_id}/detect-language")
 async def detect_note_language(
     note_id: str,
+    noise_reduction: str | None = None,
     current_user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -677,7 +718,9 @@ async def detect_note_language(
     path = _note_audio_path(note)
     if path is None:
         raise HTTPException(status_code=404, detail="Audio file not available")
-    result = await _detect_owned_audio(str(path))
+    result = await _detect_owned_audio(
+        str(path), denoise=_as_bool(noise_reduction)
+    )
     if result.get("output_language") is None and note.output_language:
         result["output_language"] = note.output_language
     return result

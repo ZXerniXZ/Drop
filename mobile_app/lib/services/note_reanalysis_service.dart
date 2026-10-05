@@ -44,6 +44,7 @@ class NoteReanalysisService {
             sourceLanguage ?? prefs.transcriptionLanguage.id,
         'output_language': outputLanguage ?? prefs.outputLanguage.id,
         if (customPrompt.isNotEmpty) 'custom_prompt': customPrompt,
+        'noise_reduction': prefs.noiseReduction,
         'available_tags': availableTags,
         if (openRouterApiKey != null && openRouterApiKey.isNotEmpty)
           'openrouter_api_key': openRouterApiKey,

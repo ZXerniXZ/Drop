@@ -17,6 +17,7 @@ class AppPreferencesService {
   static const _languageKey = 'transcription_language';
   static const _outputLanguageKey = 'output_language';
   static const _promptKey = 'custom_prompt';
+  static const _noiseReductionKey = 'noise_reduction';
   static const _tagsKey = 'note_tags';
   static const _openRouterApiKey = 'openrouter_api_key';
   static const _recordOrbStyleKey = 'dev_record_orb_style';
@@ -84,6 +85,7 @@ class AppPreferencesService {
             _store.getString(_languageKey),
       ),
       customPrompt: _store.getString(_promptKey) ?? '',
+      noiseReduction: _store.getBool(_noiseReductionKey) ?? false,
     );
   }
 
@@ -93,6 +95,7 @@ class AppPreferencesService {
     await _store.setString(_languageKey, prefs.transcriptionLanguage.id);
     await _store.setString(_outputLanguageKey, prefs.outputLanguage.id);
     await _store.setString(_promptKey, prefs.customPrompt);
+    await _store.setBool(_noiseReductionKey, prefs.noiseReduction);
   }
 
   Future<NoteTagsConfig> loadNoteTags() async {
@@ -210,6 +213,7 @@ class AppPreferencesService {
     await _store.remove(_languageKey);
     await _store.remove(_outputLanguageKey);
     await _store.remove(_promptKey);
+    await _store.remove(_noiseReductionKey);
     await _store.remove(_tagsKey);
   }
 }

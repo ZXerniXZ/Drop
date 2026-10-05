@@ -12,9 +12,17 @@ from services.openrouter_service import (
     transcribe_audio_verbose,
 )
 
-# Spezzoni ricodificati a 64 kbps restano ampiamente sotto il tetto OpenRouter.
-# Il tetto sui byte originali serve per wav/m4a densi prima della ricodifica.
-SEGMENT_TARGET_BYTES = 12 * 1024 * 1024
+# Un solo encode AAC a 16 kHz / 64 kbps: Whisper non usa la banda in più e
+# lo spezzone resta sotto il tetto OpenRouter. Il file originale non si tocca.
+SPEECH_SAMPLE_RATE = "16000"
+SPEECH_BITRATE = "64k"
+HIGHPASS_HZ = 80
+# -16 LUFS in un passaggio: niente seconda decodifica solo per misurare.
+LOUDNORM = "loudnorm=I=-16:TP=-1.5:LRA=11"
+# mix < 1 lascia passare parte del segnale originale, così le fricative
+# non vengono cancellate insieme al rumore.
+DENOISE_FILTER = "arnndn=mix=0.6"
+DENOISE_FALLBACK = "afftdn=nr=8:nf=-50"
 
 
 async def transcribe_audio_long(
@@ -30,43 +38,52 @@ async def transcribe_audio_long(
     return result["text"]
 
 
+def speech_audio_filter(*, denoise: bool, denoise_stage: str | None = None) -> str:
+    """Passa-alto, volume normalizzato e, se richiesto, riduzione del rumore."""
+    stages = [f"highpass=f={HIGHPASS_HZ}"]
+    if denoise:
+        stages.append(denoise_stage or DENOISE_FILTER)
+    stages.append(LOUDNORM)
+    return ",".join(stages)
+
+
+def speech_filter_attempts(*, denoise: bool) -> list[str]:
+    """Prima RNNoise, poi il denoise FFT se quel filtro non c'è nel ffmpeg."""
+    attempts = [speech_audio_filter(denoise=denoise)]
+    if denoise:
+        attempts.append(
+            speech_audio_filter(denoise=True, denoise_stage=DENOISE_FALLBACK)
+        )
+    return attempts
+
+
+def denoise_filter_unsupported(stderr: str) -> bool:
+    text = stderr.lower()
+    return "arnndn" in text or "no such filter" in text
+
+
 async def transcribe_audio_long_verbose(
     file_path: str,
     language: str | None = None,
     *,
     on_progress: Callable[[int, int], None] | None = None,
     api_key: str | None = None,
+    denoise: bool = False,
 ) -> dict[str, Any]:
     """Trascrive l'audio restituendo testo e timestamp assoluti.
 
-    Gli spezzoni servono sia a rispettare il limite di OpenRouter sia a dare un
-    avanzamento misurabile. ffmpeg ricodifica (non copia) così i tagli non
-    dipendono dai keyframe e il bitrate resta basso.
+    L'audio inviato a Whisper è sempre una ricodifica unica: passa-alto,
+    loudness e AAC 16 kHz. Gli spezzoni, se servono, escono dallo stesso
+    comando ffmpeg, così non c'è una seconda compressione.
     """
     path = Path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"Audio file not found: {file_path}")
 
     total_duration = probe_duration_seconds(path)
-    needs_split = path.stat().st_size > MAX_TRANSCRIPTION_FILE_BYTES or (
-        total_duration is not None and total_duration > SEGMENT_TARGET_SECONDS
+    segments_paths = await asyncio.to_thread(
+        prepare_speech_segments, path, denoise=denoise
     )
-
-    if not needs_split:
-        if on_progress:
-            on_progress(1, 1)
-        verbose = await transcribe_audio_verbose(
-            file_path, language=language, api_key=api_key
-        )
-        return {
-            "text": verbose["text"],
-            "duration": verbose.get("duration") or total_duration,
-            "segments": _normalize_segments(
-                verbose["segments"], verbose["words"], offset=0.0
-            ),
-        }
-
-    segments_paths = await asyncio.to_thread(_split_audio_file, path, total_duration)
     try:
         texts: list[str] = []
         all_segments: list[dict[str, Any]] = []
@@ -163,26 +180,61 @@ def _cleanup_segments(segments: list[Path]) -> None:
         segment.unlink(missing_ok=True)
     if segments:
         parent = segments[0].parent
-        if parent.name.startswith("drop_segments_"):
+        if parent.name.startswith(("drop_segments_", "drop_speech_")):
             shutil.rmtree(parent, ignore_errors=True)
 
 
-def _split_audio_file(
-    path: Path, total_duration: float | None = None
+def prepare_speech_segments(path: Path, *, denoise: bool = False) -> list[Path]:
+    """Prepara l'audio per Whisper senza modificare il file originale.
+
+    Un solo encode AAC. Se la registrazione supera SEGMENT_TARGET_SECONDS,
+    gli spezzoni nascono in quel comando: niente seconda compressione.
+    """
+    if not path.is_file():
+        raise FileNotFoundError(f"Audio file not found: {path}")
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="drop_speech_"))
+    try:
+        return _encode_speech_segments(path, tmp_dir, denoise=denoise)
+    except Exception:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise
+
+
+def _encode_speech_segments(
+    path: Path, tmp_dir: Path, *, denoise: bool
 ) -> list[Path]:
-    file_size = path.stat().st_size
-    duration = (
-        total_duration if total_duration is not None else probe_duration_seconds(path)
-    )
+    filters = speech_filter_attempts(denoise=denoise)
 
-    chunk_duration = float(SEGMENT_TARGET_SECONDS)
-    if duration and duration > 0:
-        byte_based_count = max(
-            1, (file_size + SEGMENT_TARGET_BYTES - 1) // SEGMENT_TARGET_BYTES
-        )
-        chunk_duration = min(chunk_duration, duration / byte_based_count)
+    last_error = ""
+    for index, audio_filter in enumerate(filters):
+        _clear_encoded(tmp_dir)
+        result = _run_speech_ffmpeg(path, tmp_dir, audio_filter)
+        segments = sorted(tmp_dir.glob("segment_*.m4a"))
+        if result.returncode == 0 and segments:
+            oversized = [
+                segment
+                for segment in segments
+                if segment.stat().st_size > MAX_TRANSCRIPTION_FILE_BYTES
+            ]
+            if oversized:
+                raise RuntimeError(
+                    "A segment still exceeds OpenRouter limit; "
+                    "reduce SEGMENT_TARGET_SECONDS"
+                )
+            return segments
 
-    tmp_dir = Path(tempfile.mkdtemp(prefix="drop_segments_"))
+        last_error = (result.stderr or result.stdout or "").strip()
+        if index == 0 and denoise and denoise_filter_unsupported(last_error):
+            continue
+        break
+
+    raise RuntimeError(f"ffmpeg speech prepare failed: {last_error}")
+
+
+def _run_speech_ffmpeg(
+    source: Path, tmp_dir: Path, audio_filter: str
+) -> subprocess.CompletedProcess[str]:
     pattern = tmp_dir / "segment_%03d.m4a"
     cmd = [
         "ffmpeg",
@@ -190,42 +242,31 @@ def _split_audio_file(
         "-loglevel",
         "error",
         "-i",
-        str(path),
+        str(source),
+        "-af",
+        audio_filter,
         "-ac",
         "1",
         "-ar",
-        "16000",
+        SPEECH_SAMPLE_RATE,
         "-c:a",
         "aac",
         "-b:a",
-        "64k",
+        SPEECH_BITRATE,
         "-f",
         "segment",
         "-segment_time",
-        str(chunk_duration),
+        str(float(SEGMENT_TARGET_SECONDS)),
         "-reset_timestamps",
         "1",
         str(pattern),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise RuntimeError(
-            f"ffmpeg split failed: {result.stderr.strip() or result.stdout}"
-        )
+    return subprocess.run(cmd, capture_output=True, text=True)
 
-    segments = sorted(tmp_dir.glob("segment_*.m4a"))
-    if not segments:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise RuntimeError("ffmpeg produced no segments")
 
-    oversized = [s for s in segments if s.stat().st_size > MAX_TRANSCRIPTION_FILE_BYTES]
-    if oversized:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise RuntimeError(
-            "A segment still exceeds OpenRouter limit; reduce SEGMENT_TARGET_SECONDS"
-        )
-    return segments
+def _clear_encoded(tmp_dir: Path) -> None:
+    for segment in tmp_dir.glob("segment_*.m4a"):
+        segment.unlink(missing_ok=True)
 
 
 def probe_duration_seconds(path: Path) -> float | None:

@@ -201,6 +201,15 @@ class LanguageDetectService {
 
   static final LanguageDetectService instance = LanguageDetectService._();
 
+  Uri _withNoiseReduction(Uri uri, bool noiseReduction) {
+    return uri.replace(
+      queryParameters: {
+        ...uri.queryParameters,
+        'noise_reduction': noiseReduction ? 'true' : 'false',
+      },
+    );
+  }
+
   Future<String> _requireToken() async {
     final token = SupabaseAuthService.instance.currentAccessToken;
     if (token == null || token.isEmpty) {
@@ -231,13 +240,14 @@ class LanguageDetectService {
   Future<DetectedLanguages> detectFromUpload(
     String uploadId, {
     required AppLanguage fallbackOutput,
+    bool noiseReduction = false,
   }) async {
     final accessToken = await _requireToken();
     final url = await ApiUrlResolver.resolveEndpoint(
       '/upload-audio/sessions/$uploadId/detect-language',
     );
     final response = await http.post(
-      Uri.parse(url),
+      _withNoiseReduction(Uri.parse(url), noiseReduction),
       headers: DropApiHeaders.json(accessToken),
     );
     if (response.statusCode != 200) {
@@ -255,13 +265,14 @@ class LanguageDetectService {
   Future<DetectedLanguages> detectFromNote(
     String noteId, {
     required AppLanguage fallbackOutput,
+    bool noiseReduction = false,
   }) async {
     final accessToken = await _requireToken();
     final url = await ApiUrlResolver.resolveEndpoint(
       '/notes/$noteId/detect-language',
     );
     final response = await http.post(
-      Uri.parse(url),
+      _withNoiseReduction(Uri.parse(url), noiseReduction),
       headers: DropApiHeaders.json(accessToken),
     );
     if (response.statusCode != 200) {

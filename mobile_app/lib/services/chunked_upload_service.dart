@@ -147,6 +147,7 @@ class ChunkedUploadService {
       'output_language': outputLanguage ?? prefs.outputLanguage.id,
       'available_tags': availableTags,
       'defer_analysis': deferAnalysis,
+      'noise_reduction': prefs.noiseReduction,
     };
     if (noteId != null && noteId.isNotEmpty) {
       body['note_id'] = noteId;
@@ -307,6 +308,7 @@ class ChunkedUploadService {
         'source_language': sourceLanguage,
         'output_language': outputLanguage,
         if (customPrompt.isNotEmpty) 'custom_prompt': customPrompt,
+        'noise_reduction': prefs.noiseReduction,
         'available_tags': availableTags,
         if (durationSeconds != null && durationSeconds > 0)
           'duration_seconds': durationSeconds,

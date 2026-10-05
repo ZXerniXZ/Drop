@@ -540,6 +540,8 @@ class _RecorderScreenState extends State<RecorderScreen>
       if (prefs.customPrompt.trim().isNotEmpty) {
         request.fields['custom_prompt'] = prefs.customPrompt.trim();
       }
+      request.fields['noise_reduction'] =
+          prefs.noiseReduction ? 'true' : 'false';
       if (durationSeconds > 0) {
         request.fields['duration_seconds'] = '$durationSeconds';
       }
@@ -838,6 +840,7 @@ class _RecorderScreenState extends State<RecorderScreen>
         detection: LanguageDetectService.instance.detectFromUpload(
           uploaded.uploadId,
           fallbackOutput: prefs.outputLanguage,
+          noiseReduction: prefs.noiseReduction,
         ),
         prefs: prefs,
       );
@@ -1514,6 +1517,7 @@ class _RecorderScreenState extends State<RecorderScreen>
         fallbackOutput: AppLanguage.outputFromKey(
           note.outputLanguage ?? prefs.outputLanguage.id,
         ),
+        noiseReduction: prefs.noiseReduction,
       ),
       prefs: prefs.copyWith(
         transcriptionLanguage: AppLanguage.fromKey(

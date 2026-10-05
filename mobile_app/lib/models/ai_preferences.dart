@@ -6,18 +6,21 @@ class AiPreferences {
     this.transcriptionLanguage = AppLanguage.automatic,
     this.outputLanguage = AppLanguage.italian,
     this.customPrompt = '',
+    this.noiseReduction = false,
   });
 
   final AiModel model;
   final AppLanguage transcriptionLanguage;
   final AppLanguage outputLanguage;
   final String customPrompt;
+  final bool noiseReduction;
 
   AiPreferences copyWith({
     AiModel? model,
     AppLanguage? transcriptionLanguage,
     AppLanguage? outputLanguage,
     String? customPrompt,
+    bool? noiseReduction,
   }) {
     return AiPreferences(
       model: model ?? this.model,
@@ -25,6 +28,7 @@ class AiPreferences {
           transcriptionLanguage ?? this.transcriptionLanguage,
       outputLanguage: outputLanguage ?? this.outputLanguage,
       customPrompt: customPrompt ?? this.customPrompt,
+      noiseReduction: noiseReduction ?? this.noiseReduction,
     );
   }
 }

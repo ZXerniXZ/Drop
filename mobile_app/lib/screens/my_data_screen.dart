@@ -751,7 +751,29 @@ class _AiPreferencesSection extends StatelessWidget {
             labelBuilder: (l) => l.label,
             onChanged: (v) => onChanged(prefs.copyWith(outputLanguage: v)),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 6),
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            title: Text(
+              'Riduzione del rumore',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontSize: 14,
+                  ),
+            ),
+            subtitle: Text(
+              'Attenua il rumore di fondo prima della trascrizione. '
+              'Su una voce già pulita può ammorbidire qualche consonante.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: DropColors.muted(context),
+                    fontSize: 11,
+                  ),
+            ),
+            value: prefs.noiseReduction,
+            onChanged: (value) =>
+                onChanged(prefs.copyWith(noiseReduction: value)),
+          ),
+          const SizedBox(height: 8),
           _FieldLabel(label: 'Prompt personalizzato'),
           const SizedBox(height: 8),
           TextField(

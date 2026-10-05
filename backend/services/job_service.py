@@ -224,6 +224,7 @@ async def run_upload_job(
     source_language: str | None = None,
     output_language: str | None = None,
     openrouter_api_key: str | None = None,
+    noise_reduction: bool = False,
 ) -> None:
     billed_seconds = 0.0
     whisper_language = source_language or language
@@ -253,6 +254,7 @@ async def run_upload_job(
             language=whisper_language,
             on_progress=on_transcribe_progress,
             api_key=user_key,
+            denoise=noise_reduction,
         )
         transcription = verbose["text"]
         transcript_segments = verbose["segments"]
@@ -343,6 +345,7 @@ def start_upload_job(
     source_language: str | None = None,
     output_language: str | None = None,
     openrouter_api_key: str | None = None,
+    noise_reduction: bool = False,
 ) -> None:
     create_job(job_id, user_id=user_id, note_id=note_id)
     asyncio.create_task(
@@ -360,6 +363,7 @@ def start_upload_job(
             source_language=source_language,
             output_language=output_language,
             openrouter_api_key=openrouter_api_key,
+            noise_reduction=noise_reduction,
         )
     )
 
