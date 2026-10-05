@@ -352,8 +352,17 @@ class OpenRouterClient {
       final body = node['body']?.toString().trim() ?? '';
       if (title.isNotEmpty) lines.add('$indent- $title');
       if (body.isNotEmpty) lines.add('$indent  $body');
+      final visuals = node['visuals'];
+      if (visuals is List && visuals.isNotEmpty) {
+        final kinds = visuals
+            .whereType<Map>()
+            .map((item) => item['kind']?.toString() ?? '')
+            .where((kind) => kind.isNotEmpty)
+            .join(', ');
+        if (kinds.isNotEmpty) lines.add('$indent  [grafici: $kinds]');
+      }
       final children = node['children'];
-      if (children is List && children.isNotEmpty && depth < 3) {
+      if (children is List && children.isNotEmpty && depth < 4) {
         final nested = _mindMapOutline(children, depth + 1);
         if (nested.isNotEmpty) lines.add(nested);
       }

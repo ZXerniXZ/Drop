@@ -5,6 +5,7 @@ import '../models/audio_note.dart';
 import '../models/note_structured_data.dart';
 import '../services/app_preferences_service.dart';
 import '../services/local_database_service.dart';
+import '../services/mind_map_share.dart';
 import '../services/note_analysis_service.dart';
 import '../services/note_share_service.dart';
 import '../theme/drop_theme.dart';
@@ -13,7 +14,8 @@ import '../widgets/note_detail/analysis_picker.dart';
 import '../widgets/note_detail/ask_ai_bar.dart';
 import '../widgets/note_detail/highlights_section.dart';
 import '../widgets/note_detail/key_data_section.dart';
-import '../widgets/note_detail/mind_map_section.dart';
+import '../widgets/note_detail/mind_map_handle.dart';
+import '../widgets/note_detail/mind_map_view.dart';
 import '../widgets/note_detail/note_chat_sheet.dart';
 import '../widgets/note_detail/note_audio_player.dart';
 import '../widgets/note_detail/speakers_section.dart';
@@ -48,6 +50,7 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
   late AudioNote _note;
   final _askAiController = TextEditingController();
   final _running = <String>{};
+  final _mindMap = MindMapHandle();
 
   @override
   void initState() {
@@ -451,12 +454,45 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
     );
   }
 
+  Future<void> _exportMindMap() async {
+    try {
+      await shareMindMapMarkdown(
+        title: _note.title,
+        nodes: _note.structuredData.mindMap,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Esportazione non riuscita')),
+      );
+    }
+  }
+
   Widget _buildNotesBody(BuildContext context) {
     if (_page == _NotesPage.picker) {
       return AnalysisPicker(
         data: _note.structuredData,
         running: _running,
         onSelect: _selectAnalysis,
+      );
+    }
+
+    if (_page == _NotesPage.mindMap) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _MindMapToolbar(
+            onFit: () => _mindMap.fit(),
+            onExport: _exportMindMap,
+          ),
+          Expanded(
+            child: MindMapView(
+              handle: _mindMap,
+              title: _note.title,
+              nodes: _note.structuredData.mindMap,
+            ),
+          ),
+        ],
       );
     }
 
@@ -491,12 +527,41 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
               blocks: _note.structuredData.speakerView,
             ),
           _NotesPage.keyData => KeyDataSection(data: _note.structuredData),
-          _NotesPage.mindMap => MindMapSection(
-              nodes: _note.structuredData.mindMap,
-            ),
-          _NotesPage.picker => const SizedBox.shrink(),
+          _NotesPage.mindMap || _NotesPage.picker => const SizedBox.shrink(),
         },
       ],
+    );
+  }
+}
+
+class _MindMapToolbar extends StatelessWidget {
+  const _MindMapToolbar({
+    required this.onFit,
+    required this.onExport,
+  });
+
+  final VoidCallback onFit;
+  final VoidCallback onExport;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = DropColors.muted(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+      child: Row(
+        children: [
+          TextButton(
+            onPressed: onFit,
+            style: TextButton.styleFrom(foregroundColor: color),
+            child: const Text('Adatta'),
+          ),
+          TextButton(
+            onPressed: onExport,
+            style: TextButton.styleFrom(foregroundColor: color),
+            child: const Text('Esporta'),
+          ),
+        ],
+      ),
     );
   }
 }

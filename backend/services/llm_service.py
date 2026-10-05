@@ -1,4 +1,5 @@
 import json
+import math
 import re
 from typing import Any
 
@@ -120,20 +121,28 @@ Return ONLY a valid JSON object:
   "mind_map": [
     {{
       "title": "short node title",
-      "body": "explanation shown when the title is opened",
+      "body": "markdown explanation, with $inline$ and $$display$$ math",
+      "visuals": [],
       "children": []
     }}
   ]
 }}
 
 Rules:
-- Write every title and body in {output_language}.
-- The map is a tree. The preview shows titles. The body appears only when a title is opened.
+- Write every title, body, and visual title in {output_language}.
+- The map is a tree of titles. The body is the explanation opened from a title. Make it specific: what was said, why it matters, and the formula or relation when one was mentioned.
 - title: one line, max 60 characters, no math, no markdown.
-- body: the explanation of that title. Plain prose. Use $...$ for inline math and $$...$$ for a formula on its own line. No other math delimiters.
-- children: nested points with the same shape. Depth at most 3. Use [] when a point has no children.
-- 3 to 10 top-level points. Follow what was actually said. Do not invent facts.
+- body: markdown. Use $...$ for inline math and $$...$$ on their own line for a display formula. No other math delimiters.
+- children: nested points with the same shape. Depth at most 4, counting the top-level points as level 1. Use [] when a point has no children.
+- 3 to 10 top-level points. Follow what was actually said. Do not invent facts, numbers, or formulas that were not in the transcript.
 - A point may have an empty body when it only groups its children.
+- visuals: 0 to 2 items, and only when a graph makes the explanation clearer. Each item is one of:
+  - {{"kind":"plot2d","title":"optional","expressions":["x^2"],"x":[-2,2]}}
+  - {{"kind":"surface3d","title":"optional","expression":"x^2+y^2","x":[-2,2],"y":[-2,2]}}
+  - {{"kind":"curve3d","title":"optional","x":"cos(t)","y":"sin(t)","z":"t/5","t":[0,12.56]}}
+  - {{"kind":"chart","title":"optional","type":"bar","labels":["A","B"],"series":[{{"name":"value","values":[1,2]}}]}}
+- Expressions use math.js syntax: x, y, or t, with + - * / ^, sqrt, sin, cos, exp, log, pi. No assignments, no imports.
+- Ranges are two finite numbers, low then high. chart type is "bar" or "line", at most 50 points, and only for quantities that were actually stated.
 - Reply with JSON only, no markdown fences or extra text."""
 
 DEFAULT_TAGS = [
@@ -283,8 +292,157 @@ def _normalize_key_data(
     }
 
 
-_MAX_MIND_NODES = 40
-_MAX_MIND_DEPTH = 3
+_MAX_MIND_NODES = 60
+_MAX_MIND_DEPTH = 4
+_MAX_MIND_EXPR = 200
+_MAX_MIND_VISUALS = 2
+_MAX_CHART_POINTS = 50
+
+
+def _finite_pair(value: Any) -> list[float] | None:
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None
+    try:
+        low = float(value[0])
+        high = float(value[1])
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(low) or not math.isfinite(high) or low == high:
+        return None
+    if low > high:
+        low, high = high, low
+    return [low, high]
+
+
+def _mind_expr(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text or len(text) > _MAX_MIND_EXPR or "\n" in text or "\x00" in text:
+        return ""
+    lowered = text.lower()
+    if any(token in lowered for token in ("import", ";", "`", "=")):
+        return ""
+    return text
+
+
+def _visual_title(item: dict[str, Any]) -> str:
+    return str(item.get("title") or "").strip()[:80]
+
+
+def _normalize_visual(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    kind = str(item.get("kind") or "").strip()
+    title = _visual_title(item)
+
+    if kind == "plot2d":
+        raw_exprs = item.get("expressions")
+        if isinstance(raw_exprs, str):
+            raw_exprs = [raw_exprs]
+        if not isinstance(raw_exprs, list):
+            return None
+        expressions = [
+            expr
+            for expr in (_mind_expr(raw) for raw in raw_exprs[:4])
+            if expr
+        ]
+        span = _finite_pair(item.get("x"))
+        if not expressions or span is None:
+            return None
+        visual: dict[str, Any] = {
+            "kind": "plot2d",
+            "expressions": expressions,
+            "x": span,
+        }
+    elif kind == "surface3d":
+        expression = _mind_expr(item.get("expression"))
+        x_span = _finite_pair(item.get("x"))
+        y_span = _finite_pair(item.get("y"))
+        if not expression or x_span is None or y_span is None:
+            return None
+        visual = {
+            "kind": "surface3d",
+            "expression": expression,
+            "x": x_span,
+            "y": y_span,
+        }
+    elif kind == "curve3d":
+        x_expr = _mind_expr(item.get("x"))
+        y_expr = _mind_expr(item.get("y"))
+        z_expr = _mind_expr(item.get("z"))
+        t_span = _finite_pair(item.get("t"))
+        if not x_expr or not y_expr or not z_expr or t_span is None:
+            return None
+        visual = {
+            "kind": "curve3d",
+            "x": x_expr,
+            "y": y_expr,
+            "z": z_expr,
+            "t": t_span,
+        }
+    elif kind == "chart":
+        chart_type = str(item.get("type") or "bar").strip().lower()
+        if chart_type not in {"bar", "line"}:
+            chart_type = "bar"
+        raw_labels = item.get("labels")
+        raw_series = item.get("series")
+        if not isinstance(raw_labels, list) or not isinstance(raw_series, list):
+            return None
+        labels = [
+            str(label).strip()[:40]
+            for label in raw_labels[:_MAX_CHART_POINTS]
+            if str(label).strip()
+        ]
+        series: list[dict[str, Any]] = []
+        for raw in raw_series[:4]:
+            if not isinstance(raw, dict):
+                continue
+            name = str(raw.get("name") or "").strip()[:40] or "Serie"
+            raw_values = raw.get("values")
+            if not isinstance(raw_values, list):
+                continue
+            values: list[float] = []
+            for raw_value in raw_values[:_MAX_CHART_POINTS]:
+                try:
+                    number = float(raw_value)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(number):
+                    values.append(number)
+            if values:
+                series.append({"name": name, "values": values})
+        if not labels or not series:
+            return None
+        limit = min(len(labels), *(len(entry["values"]) for entry in series))
+        if limit < 1:
+            return None
+        visual = {
+            "kind": "chart",
+            "type": chart_type,
+            "labels": labels[:limit],
+            "series": [
+                {"name": entry["name"], "values": entry["values"][:limit]}
+                for entry in series
+            ],
+        }
+    else:
+        return None
+
+    if title:
+        visual["title"] = title
+    return visual
+
+
+def _normalize_visuals(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    visuals: list[dict[str, Any]] = []
+    for item in value:
+        if len(visuals) >= _MAX_MIND_VISUALS:
+            break
+        visual = _normalize_visual(item)
+        if visual is not None:
+            visuals.append(visual)
+    return visuals
 
 
 def _normalize_mind_map(value: Any) -> list[dict[str, Any]]:
@@ -317,7 +475,8 @@ def _normalize_mind_map(value: Any) -> list[dict[str, Any]]:
             nodes.append(
                 {
                     "title": title[:80],
-                    "body": body[:2000],
+                    "body": body[:4000],
+                    "visuals": _normalize_visuals(item.get("visuals")),
                     "children": children,
                 }
             )

@@ -2,6 +2,7 @@ import 'package:drop/models/audio_note.dart';
 import 'package:drop/models/note_structured_data.dart';
 import 'package:drop/screens/note_detail_screen.dart';
 import 'package:drop/theme/drop_theme.dart';
+import 'package:drop/widgets/note_detail/mind_map_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -74,7 +75,7 @@ void main() {
     expect(find.text('Meeting template'), findsNothing);
   });
 
-  testWidgets('mind map shows titles until a point is opened', (tester) async {
+  testWidgets('mind map page shows the view and export', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         theme: DropTheme.light(),
@@ -88,13 +89,7 @@ void main() {
             summary: 'Un paragrafo breve.',
             structuredData: const NoteStructuredData(
               mindMap: [
-                MindMapNode(
-                  title: 'Energia',
-                  body: r'La relazione è $E=mc^2$.',
-                  children: [
-                    MindMapNode(title: 'Massa', body: 'La massa a riposo.'),
-                  ],
-                ),
+                MindMapNode(title: 'Energia', body: r'La relazione è $E=mc^2$.'),
               ],
               analysisState: {NoteStructuredData.mindMapKind: 'ready'},
             ),
@@ -108,13 +103,8 @@ void main() {
     await tester.tap(find.text('Mind map'));
     await tester.pump();
 
-    expect(find.text('Energia'), findsOneWidget);
-    expect(find.text('Massa'), findsNothing);
-
-    await tester.tap(find.text('Energia'));
-    await tester.pump();
-
-    expect(find.text('Massa'), findsOneWidget);
-    expect(find.text('Mappa'), findsOneWidget);
+    expect(find.byType(MindMapView), findsOneWidget);
+    expect(find.text('Esporta'), findsOneWidget);
+    expect(find.text('Adatta'), findsOneWidget);
   });
 }

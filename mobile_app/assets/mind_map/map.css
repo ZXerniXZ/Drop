@@ -1,0 +1,168 @@
+:root {
+  --bg: #fafafa;
+  --ink: #111111;
+  --muted: rgba(0, 0, 0, 0.45);
+  --line: rgba(0, 0, 0, 0.35);
+  --panel: #ffffff;
+  --border: rgba(0, 0, 0, 0.08);
+  --grid: rgba(0, 0, 0, 0.06);
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #000000;
+  --ink: #f4f4f5;
+  --muted: rgba(255, 255, 255, 0.45);
+  --line: rgba(255, 255, 255, 0.4);
+  --panel: #0c0c0e;
+  --border: rgba(255, 255, 255, 0.08);
+  --grid: rgba(255, 255, 255, 0.08);
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #000000;
+    --ink: #f4f4f5;
+    --muted: rgba(255, 255, 255, 0.45);
+    --line: rgba(255, 255, 255, 0.4);
+    --panel: #0c0c0e;
+    --border: rgba(255, 255, 255, 0.08);
+    --grid: rgba(255, 255, 255, 0.08);
+    color-scheme: dark;
+  }
+}
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: sans-serif;
+}
+
+#map {
+  width: 100%;
+  height: 100%;
+  display: block;
+  color: var(--ink);
+  --markmap-text-color: var(--ink);
+  --markmap-circle-open-bg: var(--bg);
+  --markmap-code-bg: var(--panel);
+  --markmap-code-color: var(--ink);
+  --markmap-a-color: var(--ink);
+  --markmap-a-hover-color: var(--ink);
+}
+
+#map .markmap-foreign,
+#map .markmap-foreign div {
+  color: var(--ink) !important;
+  font: 14px/1.35 sans-serif;
+}
+
+.markmap-foreign div {
+  cursor: pointer;
+}
+
+#sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+#sheet[hidden] {
+  display: none;
+}
+
+#sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+#sheet-card {
+  position: relative;
+  max-height: 72%;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: 16px 16px 0 0;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+}
+
+#sheet-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 16px 0;
+}
+
+#sheet-title {
+  flex: 1;
+  margin: 0;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.25;
+}
+
+#sheet-close {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: 14px/1 sans-serif;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+#sheet-scroll {
+  overflow: auto;
+  padding: 14px 16px 24px;
+  -webkit-overflow-scrolling: touch;
+}
+
+#sheet-body {
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+#sheet-body p {
+  margin: 0 0 12px;
+}
+
+#sheet-body p:last-child {
+  margin-bottom: 0;
+}
+
+#sheet-visuals figure {
+  margin: 16px 0 0;
+}
+
+#sheet-visuals figcaption {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.2px;
+}
+
+#sheet-visuals .plot {
+  width: 100%;
+  height: 240px;
+}
+
+#sheet-visuals .plot-error {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}

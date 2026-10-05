@@ -56,14 +56,17 @@ class MindMapNode {
   const MindMapNode({
     required this.title,
     this.body = '',
+    this.visuals = const [],
     this.children = const [],
   });
 
   final String title;
   final String body;
+  final List<Map<String, dynamic>> visuals;
   final List<MindMapNode> children;
 
-  bool get opens => body.trim().isNotEmpty || children.isNotEmpty;
+  bool get opens =>
+      body.trim().isNotEmpty || visuals.isNotEmpty || children.isNotEmpty;
 
   factory MindMapNode.fromMap(Map<String, dynamic> map) {
     final rawChildren = map['children'] ?? map['nodes'];
@@ -79,12 +82,25 @@ class MindMapNode {
             ?.toString()
             .trim() ??
         '';
-    return MindMapNode(title: title, body: body, children: children);
+    final rawVisuals = map['visuals'];
+    final visuals = rawVisuals is List
+        ? rawVisuals
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList()
+        : <Map<String, dynamic>>[];
+    return MindMapNode(
+      title: title,
+      body: body,
+      visuals: visuals,
+      children: children,
+    );
   }
 
   Map<String, dynamic> toMap() => {
         'title': title,
         'body': body,
+        'visuals': visuals,
         'children': children.map((node) => node.toMap()).toList(),
       };
 }

@@ -1,0 +1,13 @@
+Libraries bundled for the offline mind map.
+
+d3 7.9.0 — ISC — Copyright 2010-2023 Mike Bostock
+markmap-view 0.18.12 — MIT
+marked 9.1.6 — MIT — Copyright (c) 2018+, MarkedJS. Copyright (c) 2011-2018, Christopher Jeffrey
+KaTeX 0.16.22 — MIT — Copyright (c) 2013-2020 Khan Academy and other contributors
+math.js 13.2.3 — Apache License 2.0 — Copyright (C) 2013-2024 Jos de Jong
+Plotly.js 2.35.3 (gl3d bundle) — MIT — Copyright (c) Plotly, Inc.
+
+MIT and ISC allow use, copy, modification, and distribution, with the copyright
+notice kept. Apache 2.0 also requires keeping the notice and states changes.
+Full license texts are the standard MIT, ISC, and Apache-2.0 licenses published
+with those projects.

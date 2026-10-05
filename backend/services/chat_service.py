@@ -72,8 +72,17 @@ def _mind_map_outline(nodes: list[dict[str, Any]], depth: int = 0) -> str:
             lines.append(f"{indent}- {title}")
         if body:
             lines.append(f"{indent}  {body}")
+        visuals = node.get("visuals")
+        if isinstance(visuals, list) and visuals:
+            kinds = [
+                str(item.get("kind"))
+                for item in visuals
+                if isinstance(item, dict) and item.get("kind")
+            ]
+            if kinds:
+                lines.append(f"{indent}  [grafici: {', '.join(kinds)}]")
         children = node.get("children")
-        if isinstance(children, list) and children and depth < 3:
+        if isinstance(children, list) and children and depth < 4:
             nested = _mind_map_outline(children, depth + 1)
             if nested:
                 lines.append(nested)
