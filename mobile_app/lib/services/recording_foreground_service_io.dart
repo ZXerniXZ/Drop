@@ -2,7 +2,11 @@ import 'dart:io';
 
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
+import 'recording_clock.dart';
+
 const int recordingForegroundServiceId = 256;
+
+const String recordingNotificationTitle = 'Drop - Registrazione in corso';
 
 typedef RecordingTaskDataCallback = void Function(Object data);
 
@@ -12,20 +16,64 @@ void recordingServiceCallback() {
 }
 
 class _RecordingTaskHandler extends TaskHandler {
-  @override
-  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {}
+  bool _hasClock = false;
+  bool _paused = false;
+  int _accumulatedMs = 0;
+  int _segmentStartedAtMs = 0;
+  String _lastLabel = '';
+  bool _updating = false;
 
   @override
-  void onRepeatEvent(DateTime timestamp) {}
+  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    FlutterForegroundTask.sendDataToMain({'action': 'clock'});
+  }
+
+  @override
+  void onRepeatEvent(DateTime timestamp) {
+    _publish(DateTime.now());
+  }
 
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {}
+
+  @override
+  void onReceiveData(Object data) {
+    if (data is! Map) return;
+    final accumulated = data['accumulatedMs'];
+    if (accumulated is! num) return;
+    _accumulatedMs = accumulated.toInt();
+    final started = data['segmentStartedAtMs'];
+    _segmentStartedAtMs = started is num ? started.toInt() : 0;
+    _paused = data['paused'] == true;
+    _hasClock = true;
+    _lastLabel = '';
+    _publish(DateTime.now());
+  }
 
   @override
   void onNotificationButtonPressed(String id) {
     if (id == 'stop') {
       FlutterForegroundTask.sendDataToMain({'action': 'stop'});
     }
+  }
+
+  void _publish(DateTime now) {
+    if (!_hasClock || _updating) return;
+    final elapsed = recordingElapsedFromPayload(
+      {
+        'accumulatedMs': _accumulatedMs,
+        'segmentStartedAtMs': _segmentStartedAtMs,
+      },
+      now,
+    );
+    final label = recordingNotificationText(elapsed: elapsed, paused: _paused);
+    if (label == _lastLabel) return;
+    _lastLabel = label;
+    _updating = true;
+    FlutterForegroundTask.updateService(
+      notificationTitle: recordingNotificationTitle,
+      notificationText: label,
+    ).whenComplete(() => _updating = false);
   }
 }
 
@@ -53,7 +101,7 @@ class RecordingForegroundService {
         playSound: false,
       ),
       foregroundTaskOptions: ForegroundTaskOptions(
-        eventAction: ForegroundTaskEventAction.nothing(),
+        eventAction: ForegroundTaskEventAction.repeat(250),
         allowWakeLock: true,
         allowWifiLock: false,
       ),
@@ -83,14 +131,18 @@ class RecordingForegroundService {
 
     await requestPermissions();
 
-    if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
-      await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+    if (await FlutterForegroundTask.isRunningService) {
+      await FlutterForegroundTask.updateService(
+        notificationTitle: recordingNotificationTitle,
+        notificationText: elapsedLabel,
+      );
+      return true;
     }
 
     final result = await FlutterForegroundTask.startService(
       serviceId: recordingForegroundServiceId,
       serviceTypes: const [ForegroundServiceTypes.microphone],
-      notificationTitle: 'Drop - Registrazione in corso',
+      notificationTitle: recordingNotificationTitle,
       notificationText: elapsedLabel,
       notificationButtons: const [
         NotificationButton(id: 'stop', text: 'Stop'),
@@ -101,14 +153,19 @@ class RecordingForegroundService {
     return result is ServiceRequestSuccess;
   }
 
-  static Future<void> updateElapsed(String elapsedLabel) async {
+  /// Invia l'ancora dell'orologio al servizio. La notifica calcola i secondi
+  /// da sola, con la stessa formula dello schermo.
+  static void syncClock({
+    required int accumulatedMs,
+    required int segmentStartedAtMs,
+    required bool paused,
+  }) {
     if (!isSupported) return;
-    if (!await FlutterForegroundTask.isRunningService) return;
-
-    await FlutterForegroundTask.updateService(
-      notificationTitle: 'Drop - Registrazione in corso',
-      notificationText: elapsedLabel,
-    );
+    FlutterForegroundTask.sendDataToTask({
+      'accumulatedMs': accumulatedMs,
+      'segmentStartedAtMs': segmentStartedAtMs,
+      'paused': paused,
+    });
   }
 
   static Future<void> stop() async {

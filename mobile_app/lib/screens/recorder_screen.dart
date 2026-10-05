@@ -31,6 +31,7 @@ import '../services/local_database_service.dart';
 import '../services/note_audio_service.dart';
 import '../services/note_reanalysis_service.dart';
 import '../services/note_share_service.dart';
+import '../services/recording_clock.dart';
 import '../services/recording_foreground_service.dart';
 import '../services/server_quota_service.dart';
 import '../services/supabase_auth_service.dart';
@@ -80,9 +81,12 @@ class _RecorderScreenState extends State<RecorderScreen>
   bool _filtersVisible = false;
   List<String> _availableTags = NoteTagsConfig.defaultTags;
   Duration _elapsed = Duration.zero;
-  double _amplitudeLevel = 0;
+  final RecordingClock _clock = RecordingClock();
+  final ValueNotifier<double> _amplitudeLevel = ValueNotifier(0);
   RecordOrbStyle _orbStyle = RecordOrbStyle.gradientFluid;
   Timer? _timer;
+  bool _isArming = false;
+  int _session = 0;
   StreamSubscription<Amplitude>? _amplitudeSub;
   String? _currentPath;
   RecordConfig _recordConfig = AudioRecordingConfig.recordConfig;
@@ -97,6 +101,7 @@ class _RecorderScreenState extends State<RecorderScreen>
     RecordingForegroundService.addTaskDataCallback(_onForegroundTaskData);
     _loadNotes();
     _loadOrbStyle();
+    unawaited(_recorder.hasPermission(request: false));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_maybeShowTutorial());
     });
@@ -138,6 +143,7 @@ class _RecorderScreenState extends State<RecorderScreen>
     RecordingForegroundService.removeTaskDataCallback(_onForegroundTaskData);
     _timer?.cancel();
     _amplitudeSub?.cancel();
+    _amplitudeLevel.dispose();
     _searchController.dispose();
     _recorder.dispose();
     unawaited(WakelockPlus.disable());
@@ -148,6 +154,10 @@ class _RecorderScreenState extends State<RecorderScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       unawaited(_resumeProcessingNotes());
+      if (_isRecording || _isPaused) {
+        _publishElapsed(force: true);
+        _pushClockToNotification();
+      }
     }
     if (!kIsWeb) return;
     if (!_isRecording && !_isPaused) return;
@@ -158,10 +168,11 @@ class _RecorderScreenState extends State<RecorderScreen>
   }
 
   void _onForegroundTaskData(Object data) {
-    if (data is Map &&
-        data['action'] == 'stop' &&
-        (_isRecording || _isPaused)) {
+    if (data is! Map) return;
+    if (data['action'] == 'stop' && (_isRecording || _isPaused)) {
       _stopRecording();
+    } else if (data['action'] == 'clock' && (_isRecording || _isPaused)) {
+      _pushClockToNotification();
     }
   }
 
@@ -274,10 +285,38 @@ class _RecorderScreenState extends State<RecorderScreen>
     _updateNoteInList(updated);
   }
 
-  String _formatDuration(Duration duration) {
-    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$minutes:$seconds';
+  void _pushClockToNotification() {
+    RecordingForegroundService.syncClock(
+      accumulatedMs: _clock.accumulatedMilliseconds,
+      segmentStartedAtMs: _clock.segmentStartedAtMilliseconds,
+      paused: _clock.isPaused,
+    );
+  }
+
+  void _publishElapsed({bool force = false}) {
+    final next = _clock.elapsed();
+    if (!force && next.inSeconds == _elapsed.inSeconds) return;
+    _elapsed = next;
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  void _beginElapsedTicker() {
+    _timer?.cancel();
+    _publishElapsed(force: true);
+    _timer = Timer.periodic(const Duration(milliseconds: 200), (_) {
+      if (!mounted || !_clock.isRunning) return;
+      _publishElapsed();
+    });
+  }
+
+  void _listenAmplitude() {
+    _amplitudeSub?.cancel();
+    _amplitudeSub = _recorder
+        .onAmplitudeChanged(const Duration(milliseconds: 80))
+        .listen((amp) {
+          _amplitudeLevel.value = _normalizeAmplitude(amp.current);
+        });
   }
 
   String _formatNoteDate(DateTime dateTime) {
@@ -1072,35 +1111,63 @@ class _RecorderScreenState extends State<RecorderScreen>
     } catch (_) {}
   }
 
+  Future<bool> _ensureMicrophonePermission() async {
+    if (await _recorder.hasPermission(request: false)) return true;
+    // All'avvio il plugin può non avere ancora l'activity e rispondere false.
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    if (!mounted) return false;
+    if (await _recorder.hasPermission(request: false)) return true;
+    return _recorder.hasPermission();
+  }
+
   Future<void> _togglePauseResume() async {
+    if (_isArming || _stopping) return;
+
     if (_isPaused) {
       await _recorder.resume();
       if (!mounted) return;
+      _clock.resume();
+      _listenAmplitude();
       setState(() {
         _isPaused = false;
         _isRecording = true;
+        _elapsed = _clock.elapsed();
       });
-      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (!mounted) return;
-        setState(() => _elapsed += const Duration(seconds: 1));
-        RecordingForegroundService.updateElapsed(_formatDuration(_elapsed));
-      });
+      _beginElapsedTicker();
+      _pushClockToNotification();
       return;
     }
 
     if (!_isRecording) return;
 
-    await _recorder.pause();
+    _clock.pause();
     _timer?.cancel();
+    _timer = null;
+    await _amplitudeSub?.cancel();
+    _amplitudeSub = null;
+    _amplitudeLevel.value = 0;
     if (!mounted) return;
     setState(() {
       _isPaused = true;
       _isRecording = false;
-      _amplitudeLevel = 0;
+      _elapsed = _clock.elapsed();
     });
-    await RecordingForegroundService.updateElapsed(
-      'In pausa · ${_formatDuration(_elapsed)}',
-    );
+    _pushClockToNotification();
+
+    try {
+      await _recorder.pause();
+    } catch (_) {
+      if (!mounted || !_isPaused) return;
+      _clock.resume();
+      _listenAmplitude();
+      setState(() {
+        _isPaused = false;
+        _isRecording = true;
+        _elapsed = _clock.elapsed();
+      });
+      _beginElapsedTicker();
+      _pushClockToNotification();
+    }
   }
 
   Future<bool> _confirmRecordingNotice() async {
@@ -1143,90 +1210,123 @@ class _RecorderScreenState extends State<RecorderScreen>
   }
 
   Future<void> _startRecording() async {
-    final noticed = await _confirmRecordingNotice();
-    if (!noticed || !mounted) return;
-
-    final policy = await AppUpdateService.instance.fetchPolicy();
-    if (!mounted) return;
-    if (policy != null &&
-        AppIdentity.isBelow(policy.minVersion, policy.minBuild)) {
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => UpdateRequiredScreen(policy: policy),
-        ),
-      );
-      return;
-    }
-
-    final hasPermission = await _recorder.hasPermission();
-    if (!hasPermission) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Permesso microfono negato')),
-      );
-      return;
-    }
-
-    _recordConfig = await AudioRecordingConfig.resolve(_recorder);
-    final path = await AudioBinaryStore.instance.createRecordingDestination(
-      extension: AudioRecordingConfig.extensionFor(_recordConfig),
-    );
+    if (_isArming || _stopping || _isRecording || _isPaused) return;
+    _isArming = true;
+    final session = ++_session;
+    if (mounted) setState(() {});
 
     try {
-      await _recorder.start(_recordConfig, path: path);
-      await WakelockPlus.enable();
-    } catch (e) {
-      await WakelockPlus.disable();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Impossibile avviare la registrazione: $e')),
+      final noticed = await _confirmRecordingNotice();
+      if (!noticed || !mounted || session != _session) return;
+
+      final policy = AppUpdateService.instance.lastPolicy;
+      if (policy != null &&
+          AppIdentity.isBelow(policy.minVersion, policy.minBuild)) {
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => UpdateRequiredScreen(policy: policy),
+          ),
+        );
+        return;
+      }
+
+      final hasPermission = await _ensureMicrophonePermission();
+      if (session != _session) return;
+      if (!hasPermission) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Permesso microfono negato')),
+        );
+        return;
+      }
+
+      _recordConfig = await AudioRecordingConfig.resolve(_recorder);
+      final path = await AudioBinaryStore.instance.createRecordingDestination(
+        extension: AudioRecordingConfig.extensionFor(_recordConfig),
       );
-      return;
+      if (session != _session || !mounted) return;
+
+      try {
+        Object? startError;
+        for (var attempt = 0; attempt < 2; attempt++) {
+          try {
+            await _recorder.start(_recordConfig, path: path);
+            startError = null;
+            break;
+          } catch (error) {
+            startError = error;
+            if (attempt == 0) {
+              await Future<void>.delayed(const Duration(milliseconds: 250));
+              if (session != _session || !mounted) return;
+            }
+          }
+        }
+        if (startError != null) {
+          throw startError;
+        }
+        await WakelockPlus.enable();
+      } catch (e) {
+        await WakelockPlus.disable();
+        if (!mounted || session != _session) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Impossibile avviare la registrazione: $e')),
+        );
+        return;
+      }
+
+      if (session != _session || !mounted) {
+        await _recorder.stop();
+        await WakelockPlus.disable();
+        return;
+      }
+
+      _clock.start();
+      _amplitudeLevel.value = 0;
+      _listenAmplitude();
+      setState(() {
+        _isArming = false;
+        _isRecording = true;
+        _isPaused = false;
+        _elapsed = Duration.zero;
+        _currentPath = path;
+      });
+      _beginElapsedTicker();
+
+      await RecordingForegroundService.start(
+        elapsedLabel: formatRecordingElapsed(Duration.zero),
+      );
+      if (session != _session || (!_isRecording && !_isPaused)) {
+        await RecordingForegroundService.stop();
+        return;
+      }
+      _pushClockToNotification();
+    } finally {
+      if (session == _session && _isArming) {
+        _isArming = false;
+        if (mounted) setState(() {});
+      }
     }
-
-    await RecordingForegroundService.start(
-      elapsedLabel: _formatDuration(Duration.zero),
-    );
-
-    _amplitudeSub?.cancel();
-    _amplitudeSub = _recorder
-        .onAmplitudeChanged(const Duration(milliseconds: 80))
-        .listen((amp) {
-          if (!mounted) return;
-          setState(() => _amplitudeLevel = _normalizeAmplitude(amp.current));
-        });
-
-    setState(() {
-      _isRecording = true;
-      _isPaused = false;
-      _elapsed = Duration.zero;
-      _amplitudeLevel = 0;
-      _currentPath = path;
-    });
-
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      setState(() => _elapsed += const Duration(seconds: 1));
-      RecordingForegroundService.updateElapsed(_formatDuration(_elapsed));
-    });
   }
 
   Future<void> _stopRecording({bool interrupted = false}) async {
     if (_stopping) return;
     if (!_isRecording && !_isPaused) return;
     _stopping = true;
+    _isArming = false;
+    _session++;
 
     _timer?.cancel();
     _timer = null;
+    final recordedDuration = _clock.elapsed();
+    _clock.reset();
     await _amplitudeSub?.cancel();
     _amplitudeSub = null;
+    _amplitudeLevel.value = 0;
 
     try {
       if (_isPaused) {
         await _recorder.resume();
       }
-
-      final recordedDuration = _elapsed;
       final path = await _recorder.stop();
       await RecordingForegroundService.stop();
       await WakelockPlus.disable();
@@ -1236,7 +1336,6 @@ class _RecorderScreenState extends State<RecorderScreen>
         _isRecording = false;
         _isPaused = false;
         _elapsed = Duration.zero;
-        _amplitudeLevel = 0;
       });
 
       final recorderPath = path ?? _currentPath;
@@ -1319,11 +1418,15 @@ class _RecorderScreenState extends State<RecorderScreen>
     if (confirmed != true || !mounted) return;
     if (_stopping) return;
     _stopping = true;
+    _isArming = false;
+    _session++;
 
     _timer?.cancel();
     _timer = null;
+    _clock.reset();
     await _amplitudeSub?.cancel();
     _amplitudeSub = null;
+    _amplitudeLevel.value = 0;
 
     try {
       if (_isPaused) {
@@ -1351,7 +1454,6 @@ class _RecorderScreenState extends State<RecorderScreen>
         _isRecording = false;
         _isPaused = false;
         _elapsed = Duration.zero;
-        _amplitudeLevel = 0;
       });
     } finally {
       _stopping = false;
@@ -1592,8 +1694,9 @@ class _RecorderScreenState extends State<RecorderScreen>
               onCancelRecording: _cancelRecording,
               isRecording: _isRecording,
               isPaused: _isPaused,
+              isArming: _isArming,
               elapsedLabel: (_isRecording || _isPaused)
-                  ? _formatDuration(_elapsed)
+                  ? formatRecordingElapsed(_elapsed)
                   : null,
               amplitudeLevel: _amplitudeLevel,
               orbStyle: _orbStyle,

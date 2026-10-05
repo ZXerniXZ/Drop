@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:ui' show lerpDouble;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -23,6 +25,7 @@ class DropBottomNav extends StatelessWidget {
     required this.isRecording,
     required this.isPaused,
     required this.amplitudeLevel,
+    this.isArming = false,
     this.elapsedLabel,
     this.orbStyle = RecordOrbStyle.gradientFluid,
     this.onOrbPreview,
@@ -36,7 +39,8 @@ class DropBottomNav extends StatelessWidget {
   final VoidCallback onCancelRecording;
   final bool isRecording;
   final bool isPaused;
-  final double amplitudeLevel;
+  final bool isArming;
+  final ValueListenable<double> amplitudeLevel;
   final String? elapsedLabel;
   final RecordOrbStyle orbStyle;
   final VoidCallback? onOrbPreview;
@@ -74,6 +78,7 @@ class DropBottomNav extends StatelessWidget {
             child: _RecordingControlCluster(
               isRecording: isRecording,
               isPaused: isPaused,
+              isArming: isArming,
               elapsedLabel: elapsedLabel,
               amplitudeLevel: amplitudeLevel,
               orbStyle: orbStyle,
@@ -185,6 +190,7 @@ class _RecordingControlCluster extends StatefulWidget {
   const _RecordingControlCluster({
     required this.isRecording,
     required this.isPaused,
+    required this.isArming,
     required this.amplitudeLevel,
     this.elapsedLabel,
     required this.onPauseResume,
@@ -197,7 +203,8 @@ class _RecordingControlCluster extends StatefulWidget {
 
   final bool isRecording;
   final bool isPaused;
-  final double amplitudeLevel;
+  final bool isArming;
+  final ValueListenable<double> amplitudeLevel;
   final String? elapsedLabel;
   final RecordOrbStyle orbStyle;
   final VoidCallback onStart;
@@ -220,10 +227,14 @@ class _RecordingControlClusterState extends State<_RecordingControlCluster>
   late final Animation<double> _breath;
   double _displayAmp = 0;
   bool _orbPressed = false;
+  Timer? _longPressTimer;
+  bool _longPressFired = false;
+  Offset? _pointerDown;
 
   @override
   void initState() {
     super.initState();
+    widget.amplitudeLevel.addListener(_onAmplitude);
     _expandController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 520),
@@ -246,16 +257,65 @@ class _RecordingControlClusterState extends State<_RecordingControlCluster>
     }
   }
 
+  void _onAmplitude() {
+    if (!mounted || !widget.isRecording) return;
+    final level = widget.amplitudeLevel.value;
+    _displayAmp += (level - _displayAmp) * 0.28;
+    _orbKey.currentState?.setAudioLevel(level);
+    setState(() {});
+  }
+
+  void _onOrbPointerDown(PointerDownEvent event) {
+    if (widget.isArming) return;
+    _longPressFired = false;
+    _pointerDown = event.position;
+    setState(() => _orbPressed = true);
+    _longPressTimer?.cancel();
+    final preview = widget.onLongPress;
+    if (preview == null || widget.isRecording || widget.isPaused) return;
+    _longPressTimer = Timer(const Duration(milliseconds: 450), () {
+      _longPressFired = true;
+      if (!mounted) return;
+      setState(() => _orbPressed = false);
+      preview();
+    });
+  }
+
+  void _onOrbPointerUp(PointerUpEvent event) {
+    _longPressTimer?.cancel();
+    final down = _pointerDown;
+    _pointerDown = null;
+    if (mounted) setState(() => _orbPressed = false);
+    if (widget.isArming || _longPressFired) return;
+    if (down != null && (event.position - down).distance > 18) return;
+    HapticFeedback.mediumImpact();
+    if (widget.isRecording || widget.isPaused) {
+      widget.onFinish();
+    } else {
+      widget.onStart();
+    }
+  }
+
+  void _onOrbPointerCancel(PointerCancelEvent event) {
+    _longPressTimer?.cancel();
+    _pointerDown = null;
+    if (mounted) setState(() => _orbPressed = false);
+  }
+
   @override
   void didUpdateWidget(covariant _RecordingControlCluster oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.amplitudeLevel != widget.amplitudeLevel) {
+      oldWidget.amplitudeLevel.removeListener(_onAmplitude);
+      widget.amplitudeLevel.addListener(_onAmplitude);
+    }
     final active = widget.isRecording || widget.isPaused;
     final wasActive = oldWidget.isRecording || oldWidget.isPaused;
 
     if (active && !wasActive) {
       _expandController.forward();
       if (widget.isRecording) {
-        _orbKey.currentState?.setAudioLevel(widget.amplitudeLevel);
+        _orbKey.currentState?.setAudioLevel(widget.amplitudeLevel.value);
       }
     } else if (!active && wasActive) {
       _expandController.reverse();
@@ -264,15 +324,13 @@ class _RecordingControlClusterState extends State<_RecordingControlCluster>
     if (!widget.isRecording && oldWidget.isRecording) {
       _displayAmp = 0;
       _orbKey.currentState?.setAudioLevel(0);
-    } else if (widget.isRecording &&
-        widget.amplitudeLevel != oldWidget.amplitudeLevel) {
-      _orbKey.currentState?.setAudioLevel(widget.amplitudeLevel);
-      _displayAmp += (widget.amplitudeLevel - _displayAmp) * 0.22;
     }
   }
 
   @override
   void dispose() {
+    _longPressTimer?.cancel();
+    widget.amplitudeLevel.removeListener(_onAmplitude);
     _expandController.dispose();
     _breathController.dispose();
     super.dispose();
@@ -289,10 +347,6 @@ class _RecordingControlClusterState extends State<_RecordingControlCluster>
       builder: (context, child) {
         final expand = _expand.value.clamp(0.0, 1.0);
         final breath = active ? 0.0 : _breath.value;
-        if (widget.isRecording) {
-          _displayAmp += (widget.amplitudeLevel - _displayAmp) * 0.28;
-          _orbKey.currentState?.setAudioLevel(widget.amplitudeLevel);
-        }
         final amp = widget.isRecording ? _displayAmp : 0.0;
         final orbShell = lerpDouble(68, 92, expand)!;
         final orbContent = lerpDouble(52, 60, expand)!;
@@ -328,19 +382,11 @@ class _RecordingControlClusterState extends State<_RecordingControlCluster>
                   widget.onCancel();
                 },
               ),
-              GestureDetector(
-                onTapDown: (_) => setState(() => _orbPressed = true),
-                onTapUp: (_) => setState(() => _orbPressed = false),
-                onTapCancel: () => setState(() => _orbPressed = false),
-                onTap: () {
-                  HapticFeedback.mediumImpact();
-                  if (active) {
-                    widget.onFinish();
-                  } else {
-                    widget.onStart();
-                  }
-                },
-                onLongPress: active ? null : widget.onLongPress,
+              Listener(
+                behavior: HitTestBehavior.opaque,
+                onPointerDown: _onOrbPointerDown,
+                onPointerUp: _onOrbPointerUp,
+                onPointerCancel: _onOrbPointerCancel,
                 child: AnimatedScale(
                   scale: _orbPressed ? 0.94 : 1.0,
                   duration: DropMotion.fast,
@@ -410,18 +456,21 @@ class _SatelliteButton extends StatelessWidget {
     final color = Theme.of(context).colorScheme.onSurface;
 
     return Positioned(
-      child: Transform.translate(
-        offset: Offset(dx, 0),
-        child: Transform.scale(
-          scale: scale,
-          child: Opacity(
-            opacity: t,
-            child: GestureDetector(
-              onTap: t > 0.8 ? onTap : null,
-              behavior: HitTestBehavior.opaque,
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Icon(icon, size: 28, color: color),
+      child: IgnorePointer(
+        ignoring: t < 0.85,
+        child: Transform.translate(
+          offset: Offset(dx, 0),
+          child: Transform.scale(
+            scale: scale,
+            child: Opacity(
+              opacity: t,
+              child: GestureDetector(
+                onTap: onTap,
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Icon(icon, size: 28, color: color),
+                ),
               ),
             ),
           ),

@@ -15,7 +15,11 @@ class RecordingForegroundService {
 
   static Future<bool> start({required String elapsedLabel}) async => true;
 
-  static Future<void> updateElapsed(String elapsedLabel) async {}
+  static void syncClock({
+    required int accumulatedMs,
+    required int segmentStartedAtMs,
+    required bool paused,
+  }) {}
 
   static Future<void> stop() async {}
 }
