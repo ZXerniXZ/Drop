@@ -66,10 +66,29 @@ class MindMapNormalizeTest(unittest.TestCase):
             ]
         )
         visuals = nodes[0]["visuals"]
-        self.assertEqual(len(visuals), 1)
-        self.assertEqual(visuals[0]["kind"], "chart")
-        self.assertEqual(visuals[0]["labels"], ["A", "B"])
-        self.assertEqual(visuals[0]["series"][0]["values"], [1, 2])
+        self.assertEqual(len(visuals), 2)
+        self.assertEqual(visuals[0]["kind"], "plot2d")
+        self.assertEqual(visuals[0]["expressions"], ["x"])
+        self.assertEqual(visuals[1]["kind"], "chart")
+        self.assertEqual(visuals[1]["labels"], ["A", "B"])
+        self.assertEqual(visuals[1]["series"][0]["values"], [1, 2])
+
+    def test_cleans_expression_notation(self):
+        nodes = _normalize_mind_map(
+            [
+                {
+                    "title": "Curve",
+                    "visuals": [
+                        {
+                            "kind": "plot2d",
+                            "expressions": ["f(x) = 2·x² − 1", "x >= 1", "import(x)"],
+                            "x": [-1, 1],
+                        },
+                    ],
+                }
+            ]
+        )
+        self.assertEqual(nodes[0]["visuals"][0]["expressions"], ["2*x^2 - 1"])
 
     def test_limits_depth_and_visual_count(self):
         deep = {"title": "L4", "children": [{"title": "L5"}]}

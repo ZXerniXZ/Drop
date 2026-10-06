@@ -149,7 +149,7 @@ Rules:
   - {{"kind":"surface3d","title":"optional","expression":"x^2+y^2","x":[-2,2],"y":[-2,2]}}
   - {{"kind":"curve3d","title":"optional","x":"cos(t)","y":"sin(t)","z":"t/5","t":[0,12.56]}}
   - {{"kind":"chart","title":"optional","type":"bar","labels":["A","B"],"series":[{{"name":"value","values":[1,2]}}]}}
-- Expressions use math.js syntax: x, y, or t, with + - * / ^, sqrt, sin, cos, exp, log, pi. No assignments, no imports.
+- Expressions use math.js syntax: x, y, or t, with + - * / ^, sqrt, sin, cos, tan, exp, log, abs, pi. Write only the right-hand side ("x^2", not "y = x^2"). Use plain ASCII, no LaTeX. Replace every constant with the number that was said; if no number was said, use a simple value like 1 so the shape still shows. No assignments, no imports.
 - Ranges are two finite numbers, low then high. chart type is "bar" or "line", at most 50 points, and only for quantities that were actually stated.
 - Reply with JSON only, no markdown fences or extra text."""
 
@@ -369,12 +369,36 @@ def _finite_pair(value: Any) -> list[float] | None:
     return [low, high]
 
 
+_EXPR_REPLACEMENTS = (
+    ("$", ""),
+    ("−", "-"),
+    ("–", "-"),
+    ("×", "*"),
+    ("·", "*"),
+    ("÷", "/"),
+    ("π", "pi"),
+    ("²", "^2"),
+    ("³", "^3"),
+    ("**", "^"),
+)
+
+
 def _mind_expr(value: Any) -> str:
     text = str(value or "").strip()
-    if not text or len(text) > _MAX_MIND_EXPR or "\n" in text or "\x00" in text:
+    if not text or "\n" in text or "\x00" in text:
+        return ""
+    if "=" in text:
+        head, _, tail = text.rpartition("=")
+        if head and head[-1] in "<>!":
+            return ""
+        text = tail.strip()
+    for old, new in _EXPR_REPLACEMENTS:
+        text = text.replace(old, new)
+    text = text.strip()
+    if not text or len(text) > _MAX_MIND_EXPR:
         return ""
     lowered = text.lower()
-    if any(token in lowered for token in ("import", ";", "`", "=")):
+    if any(token in lowered for token in ("import", ";", "`")):
         return ""
     return text
 
