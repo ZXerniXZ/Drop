@@ -51,6 +51,7 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
   final _askAiController = TextEditingController();
   final _running = <String>{};
   final _mindMap = MindMapHandle();
+  var _mindMapInteractive = true;
 
   @override
   void initState() {
@@ -110,29 +111,44 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
     };
   }
 
+  Future<T?> _pauseMindMap<T>(Future<T?> Function() action) async {
+    final pause = _page == _NotesPage.mindMap && _mindMapInteractive;
+    if (pause) {
+      setState(() => _mindMapInteractive = false);
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    try {
+      return await action();
+    } finally {
+      if (pause && mounted) setState(() => _mindMapInteractive = true);
+    }
+  }
+
   Future<void> _confirmClearAnalysis(String kind) async {
     final label = _analysisLabel(kind);
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Eliminare $label?'),
-        content: const Text(
-          'Il riassunto e la trascrizione restano. '
-          'Puoi generare di nuovo questa sezione.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Annulla'),
+    final confirmed = await _pauseMindMap(
+      () => showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Eliminare $label?'),
+          content: const Text(
+            'Il riassunto e la trascrizione restano. '
+            'Puoi generare di nuovo questa sezione.',
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text(
-              'Elimina',
-              style: TextStyle(color: DropColors.recordRed),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Annulla'),
             ),
-          ),
-        ],
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text(
+                'Elimina',
+                style: TextStyle(color: DropColors.recordRed),
+              ),
+            ),
+          ],
+        ),
       ),
     );
     if (confirmed != true || !mounted) return;
@@ -306,6 +322,14 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
       setState(() => _page = _pageFor(kind));
       return;
     }
+    await _runAnalysis(kind);
+  }
+
+  Future<void> _regenerateAnalysis(String kind) async {
+    await _runAnalysis(kind);
+  }
+
+  Future<void> _runAnalysis(String kind) async {
     if (_running.contains(kind)) return;
 
     setState(() => _running.add(kind));
@@ -494,8 +518,6 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
             data.isReady(NoteStructuredData.speakersKind) &&
             data.isReady(NoteStructuredData.keyDataKind) &&
             data.isReady(NoteStructuredData.mindMapKind));
-    final currentKind = _analysisKind(_page);
-    final canClear = currentKind != null && data.isReady(currentKind);
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -517,21 +539,6 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
                 HapticFeedback.selectionClick();
                 setState(() => _page = _NotesPage.picker);
               },
-            ),
-          ],
-          if (canClear) ...[
-            const SizedBox(width: 4),
-            TextButton(
-              onPressed: () => _confirmClearAnalysis(currentKind),
-              style: TextButton.styleFrom(
-                foregroundColor: DropColors.muted(context),
-                visualDensity: VisualDensity.compact,
-                textStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                    ),
-              ),
-              child: const Text('Elimina'),
             ),
           ],
         ],
@@ -559,6 +566,8 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
         data: _note.structuredData,
         running: _running,
         onSelect: _selectAnalysis,
+        onRegenerate: _regenerateAnalysis,
+        onDelete: _confirmClearAnalysis,
       );
     }
 
@@ -575,6 +584,7 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
               handle: _mindMap,
               title: _note.title,
               nodes: _note.structuredData.mindMap,
+              interactive: _mindMapInteractive,
             ),
           ),
         ],

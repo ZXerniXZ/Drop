@@ -32,7 +32,8 @@ Rules:
 
 const noteChatSystemPrompt = '''You are Drop, an AI assistant for a single voice note.
 Reply ONLY from the provided note context. If the information is not in the context, say so clearly.
-Reply in {output_language}, concisely and helpfully. Bullet lists or light markdown are fine.''';
+Reply in {output_language}, concisely and helpfully. Bullet lists or light markdown are fine.
+When the answer includes source code, a command, or configuration, put it in a fenced markdown block with a language tag. Keep the original indentation and line breaks. Do not wrap the whole reply in one fence, and do not place code inside math delimiters.''';
 
 String buildAnalysisSystemPrompt({String? outputLanguage}) {
   return analysisSystemPromptTemplate.replaceAll(

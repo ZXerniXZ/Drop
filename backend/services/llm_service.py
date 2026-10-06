@@ -139,6 +139,7 @@ Rules:
 - The body is the explanation opened from a title. Make it specific: what was said at that moment, why it matters, and the formula or relation when one was mentioned.
 - title: one line, max 60 characters, no math, no markdown.
 - body: markdown. Use $...$ for inline math and $$...$$ on their own line for a display formula. No other math delimiters.
+- If the speaker dictates source code, a command, pseudocode, or configuration, put it in the body as a fenced block: three backticks, the language name, a line break, the code with its original indentation, a line break, then three backticks. Keep code out of the title and out of $...$ and $$...$$. Do not invent code that was not in the transcript.
 - children: nested points with the same shape. Depth at most 4, counting the top-level points as level 1. Use [] when a point has no children.
 - One top-level point per subject change. A short note may have two; a long lesson may have more. Do not invent extra points to fill a quota, and do not merge two subjects into one point.
 - Do not invent facts, numbers, or formulas that were not in the transcript.

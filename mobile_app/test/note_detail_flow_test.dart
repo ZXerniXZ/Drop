@@ -2,6 +2,7 @@ import 'package:drop/models/audio_note.dart';
 import 'package:drop/models/note_structured_data.dart';
 import 'package:drop/screens/note_detail_screen.dart';
 import 'package:drop/theme/drop_theme.dart';
+import 'package:drop/widgets/note_detail/analysis_picker.dart';
 import 'package:drop/widgets/note_detail/mind_map_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -71,7 +72,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Manda gli appunti'), findsOneWidget);
-    expect(find.text('Elimina'), findsOneWidget);
+    expect(find.text('Elimina'), findsNothing);
     expect(find.text('Genera mappa mentale'), findsNothing);
     expect(find.text('Meeting template'), findsNothing);
   });
@@ -107,5 +108,34 @@ void main() {
     expect(find.byType(MindMapView), findsOneWidget);
     expect(find.text('Esporta'), findsOneWidget);
     expect(find.text('Adatta'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pump();
+    await tester.longPress(
+      find.descendant(
+        of: find.byType(AnalysisPicker),
+        matching: find.text('Mind map'),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('Rigenera'), findsOneWidget);
+    expect(find.text('Elimina'), findsOneWidget);
+
+    await tester.tap(find.text('Elimina'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('Annulla'), findsOneWidget);
+    await tester.tap(find.text('Annulla'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('Annulla'), findsNothing);
+    await tester.tap(find.text('Mind map').first);
+    await tester.pump();
+
+    expect(find.text('Esporta'), findsOneWidget);
   });
 }

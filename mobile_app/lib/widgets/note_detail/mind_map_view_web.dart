@@ -14,11 +14,13 @@ class MindMapView extends StatefulWidget {
     required this.handle,
     required this.title,
     required this.nodes,
+    this.interactive = true,
   });
 
   final MindMapHandle handle;
   final String title;
   final List<MindMapNode> nodes;
+  final bool interactive;
 
   @override
   State<MindMapView> createState() => _MindMapViewState();
@@ -67,6 +69,7 @@ class _MindMapViewState extends State<MindMapView> {
     if (oldWidget.title != widget.title || oldWidget.nodes != widget.nodes) {
       _render();
     }
+    _setHitTesting(widget.interactive);
   }
 
   @override
@@ -115,8 +118,27 @@ class _MindMapViewState extends State<MindMapView> {
     _iframe.contentWindow?.postMessage(message.jsify(), '*'.toJS);
   }
 
+  void _setHitTesting(bool interactive) {
+    final value = interactive ? 'auto' : 'none';
+    _iframe.style.pointerEvents = value;
+    var parent = _iframe.parentElement;
+    for (var depth = 0; depth < 4 && parent != null; depth += 1) {
+      final tag = parent.tagName.toLowerCase();
+      if (tag == 'body' || tag == 'html') break;
+      if (parent.isA<web.HTMLElement>()) {
+        (parent as web.HTMLElement).style.pointerEvents = value;
+      }
+      parent = parent.parentElement;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (!widget.interactive) {
+      _setHitTesting(false);
+      return const SizedBox.expand();
+    }
+    _setHitTesting(true);
     return HtmlElementView(viewType: _viewType);
   }
 }

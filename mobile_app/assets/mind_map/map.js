@@ -367,6 +367,7 @@
           { left: '$', right: '$', display: false },
         ],
         throwOnError: false,
+        ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option'],
       });
     }
     sheetVisuals.innerHTML = '';

@@ -14,11 +14,13 @@ class MindMapView extends StatefulWidget {
     required this.handle,
     required this.title,
     required this.nodes,
+    this.interactive = true,
   });
 
   final MindMapHandle handle;
   final String title;
   final List<MindMapNode> nodes;
+  final bool interactive;
 
   @override
   State<MindMapView> createState() => _MindMapViewState();
@@ -100,11 +102,12 @@ class _MindMapViewState extends State<MindMapView> {
 
   @override
   Widget build(BuildContext context) {
-    if (_underTest || _controller == null) {
+    if (_underTest || _controller == null || !widget.interactive) {
       return placeholder.MindMapView(
         handle: widget.handle,
         title: widget.title,
         nodes: widget.nodes,
+        interactive: widget.interactive,
       );
     }
     return WebViewWidget(controller: _controller!);

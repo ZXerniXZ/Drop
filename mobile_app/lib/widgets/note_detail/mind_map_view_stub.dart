@@ -9,11 +9,13 @@ class MindMapView extends StatelessWidget {
     required this.handle,
     required this.title,
     required this.nodes,
+    this.interactive = true,
   });
 
   final MindMapHandle handle;
   final String title;
   final List<MindMapNode> nodes;
+  final bool interactive;
 
   @override
   Widget build(BuildContext context) {
