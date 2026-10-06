@@ -83,9 +83,48 @@ class NoteAnalysisService {
     }
   }
 
+  Future<AudioNote> clear({
+    required AudioNote note,
+    required String kind,
+  }) async {
+    final token = SupabaseAuthService.instance.currentAccessToken;
+    if (token == null || token.isEmpty) {
+      throw Exception('Sessione scaduta. Effettua di nuovo l\'accesso.');
+    }
+
+    final url = await ApiUrlResolver.resolveEndpoint(
+      '/notes/${note.id}/analyses/$kind',
+    );
+    final response = await http.delete(
+      Uri.parse(url),
+      headers: DropApiHeaders.auth(token),
+    );
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw Exception('Sessione scaduta. Effettua di nuovo l\'accesso.');
+    }
+    if (response.statusCode != 200) {
+      throw Exception('Eliminazione non riuscita');
+    }
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final fresh = await LocalDatabaseService.instance.getNote(note.id) ?? note;
+    var updated = mergeAnalysisResult(fresh, data);
+    if (kind == NoteStructuredData.highlightsKind) {
+      updated = updated.copyWith(
+        structuredData: updated.structuredData.copyWith(
+          checkedHighlights: const [],
+        ),
+      );
+    }
+    await LocalDatabaseService.instance.saveNote(updated);
+    return updated;
+  }
+
   Future<Map<String, dynamic>> _poll(String jobId, String accessToken) async {
     const pollInterval = Duration(seconds: 2);
-    const maxAttempts = 90;
+    // Il server aspetta il modello fino a 5 minuti. GLM e gli altri modelli
+    // lenti superano i 3 minuti del limite precedente.
+    const maxAttempts = 180;
     var gatewayFailures = 0;
 
     for (var attempt = 0; attempt < maxAttempts; attempt++) {

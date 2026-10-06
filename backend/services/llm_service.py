@@ -221,6 +221,53 @@ def resolve_llm_model(ai_model: str | None) -> str:
     )
 
 
+def _content_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for item in content:
+        if isinstance(item, str):
+            parts.append(item)
+        elif isinstance(item, dict):
+            parts.append(str(item.get("text") or item.get("content") or ""))
+    return "".join(parts)
+
+
+def _message_text(message: Any) -> str:
+    if not isinstance(message, dict):
+        return ""
+    text = _content_to_text(message.get("content")).strip()
+    if text:
+        return text
+    reasoning = message.get("reasoning")
+    if isinstance(reasoning, str):
+        return reasoning
+    return ""
+
+
+def apply_analysis_removal(note: Any, kind: str) -> None:
+    """Svuota una sola analisi e la segna come rimossa, cosi' non torna
+    'pronta' solo perche' il riassunto vecchio contiene delle sezioni."""
+    if kind not in ANALYSIS_KINDS:
+        raise ValueError(f"Unknown analysis kind: {kind}")
+    state = dict(getattr(note, "analysis_state", None) or {})
+    state[kind] = "removed"
+    if kind == "highlights":
+        note.highlights = []
+    elif kind == "speakers":
+        note.speaker_view = []
+        raw = getattr(note, "raw_transcription", None) or ""
+        if str(raw).strip():
+            note.formatted_transcription = raw
+    elif kind == "key_data":
+        note.key_data = empty_key_data()
+    elif kind == "mind_map":
+        note.mind_map = []
+    note.analysis_state = state
+
+
 def _strip_json_fence(content: str) -> str:
     text = content.strip()
     if text.startswith("```"):
@@ -518,6 +565,7 @@ async def _complete_json(
     user: str,
     model: str | None,
     api_key: str | None,
+    max_tokens: int | None = None,
 ) -> dict[str, Any]:
     resolved_key = (api_key or "").strip() or OPENROUTER_API_KEY
     if not resolved_key:
@@ -529,32 +577,42 @@ async def _complete_json(
         "HTTP-Referer": APP_REFERER,
         "X-Title": APP_TITLE,
     }
-    payload = {
+    payload: dict[str, Any] = {
         "model": resolve_llm_model(model),
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
         "response_format": {"type": "json_object"},
+        # I modelli che ragionano (GLM e simili) altrimenti consumano
+        # minuti prima di scrivere il JSON.
+        "reasoning": {"effort": "low"},
     }
-
-    async with httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS) as client:
-        response = await client.post(
-            OPENROUTER_CHAT_URL,
-            json=payload,
-            headers=headers,
-        )
-        if response.is_error:
-            raise ValueError(
-                f"OpenRouter LLM error {response.status_code}: {response.text}"
-            )
-        data = response.json()
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
 
     try:
-        content = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError) as exc:
+        async with httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS) as client:
+            response = await client.post(
+                OPENROUTER_CHAT_URL,
+                json=payload,
+                headers=headers,
+            )
+    except httpx.TimeoutException as exc:
+        raise ValueError(
+            "Il modello non ha risposto in tempo. Riprova o scegline uno più rapido."
+        ) from exc
+    if response.is_error:
+        raise ValueError(
+            f"OpenRouter LLM error {response.status_code}: {response.text}"
+        )
+    data = response.json()
+
+    try:
+        message = data["choices"][0]["message"]
+    except (KeyError, IndexError, TypeError) as exc:
         raise ValueError("Unexpected OpenRouter chat response format") from exc
-    return _load_first_json_object(content)
+    return _load_first_json_object(_message_text(message))
 
 
 async def process_transcript(
@@ -666,6 +724,7 @@ async def process_optional_analysis(
             ),
             model=model,
             api_key=api_key,
+            max_tokens=12000,
         )
         return {"mind_map": _normalize_mind_map(data.get("mind_map"))}
 

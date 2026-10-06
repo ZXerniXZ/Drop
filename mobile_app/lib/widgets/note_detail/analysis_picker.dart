@@ -30,7 +30,6 @@ class _Mark {
     required this.ax,
     required this.ay,
     required this.phase,
-    this.illustrated = true,
   });
 
   final String kind;
@@ -39,7 +38,6 @@ class _Mark {
   final double ax;
   final double ay;
   final double phase;
-  final bool illustrated;
 }
 
 const _marks = <_Mark>[
@@ -50,7 +48,6 @@ const _marks = <_Mark>[
     ax: 0.26,
     ay: 0.20,
     phase: 0.2,
-    illustrated: false,
   ),
   _Mark(
     kind: NoteStructuredData.highlightsKind,
@@ -191,26 +188,20 @@ class _AnalysisPickerState extends State<AnalysisPicker>
                             ]
                           : null,
                     ),
-                    child: ClipOval(
-                      child: Opacity(
-                        opacity: ready ? 1 : 0.55,
-                        child: mark.illustrated
-                            ? Image.asset(
-                                'assets/analyses/${mark.kind}_${isDark ? 'dark' : 'light'}.jpg',
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, _, _) => Icon(
-                                  _fallbackIcon(mark.kind),
-                                  size: mark.size * 0.34,
-                                  color: Theme.of(context).colorScheme.onSurface,
-                                ),
-                              )
-                            : Icon(
-                                _fallbackIcon(mark.kind),
-                                size: mark.size * 0.34,
-                                color: Theme.of(context).colorScheme.onSurface,
-                              ),
+                      child: ClipOval(
+                        child: Opacity(
+                          opacity: ready ? 1 : 0.55,
+                          child: Image.asset(
+                            'assets/analyses/${mark.kind}_${isDark ? 'dark' : 'light'}.jpg',
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => Icon(
+                              _fallbackIcon(mark.kind),
+                              size: mark.size * 0.34,
+                              color: Theme.of(context).colorScheme.onSurface,
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
                   ),
                   if (running)
                     SizedBox(

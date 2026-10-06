@@ -71,6 +71,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Manda gli appunti'), findsOneWidget);
+    expect(find.text('Elimina'), findsOneWidget);
     expect(find.text('Genera mappa mentale'), findsNothing);
     expect(find.text('Meeting template'), findsNothing);
   });

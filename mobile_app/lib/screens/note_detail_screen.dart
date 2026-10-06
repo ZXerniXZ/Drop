@@ -91,6 +91,74 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
     Navigator.of(context).pop();
   }
 
+  String? _analysisKind(_NotesPage page) {
+    return switch (page) {
+      _NotesPage.highlights => NoteStructuredData.highlightsKind,
+      _NotesPage.speakers => NoteStructuredData.speakersKind,
+      _NotesPage.keyData => NoteStructuredData.keyDataKind,
+      _NotesPage.mindMap => NoteStructuredData.mindMapKind,
+      _ => null,
+    };
+  }
+
+  String _analysisLabel(String kind) {
+    return switch (kind) {
+      NoteStructuredData.speakersKind => 'Speakers',
+      NoteStructuredData.keyDataKind => 'Key data',
+      NoteStructuredData.mindMapKind => 'Mind map',
+      _ => 'Highlights',
+    };
+  }
+
+  Future<void> _confirmClearAnalysis(String kind) async {
+    final label = _analysisLabel(kind);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Eliminare $label?'),
+        content: const Text(
+          'Il riassunto e la trascrizione restano. '
+          'Puoi generare di nuovo questa sezione.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Annulla'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(
+              'Elimina',
+              style: TextStyle(color: DropColors.recordRed),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      final updated = await NoteAnalysisService.instance.clear(
+        note: _note,
+        kind: kind,
+      );
+      if (!mounted) {
+        widget.onChanged?.call(updated);
+        return;
+      }
+      setState(() {
+        _note = updated;
+        if (_analysisKind(_page) == kind) _page = _NotesPage.summary;
+      });
+      widget.onChanged?.call(updated);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$error')),
+      );
+    }
+  }
+
   Future<void> _confirmReanalyze() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -426,6 +494,8 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
             data.isReady(NoteStructuredData.speakersKind) &&
             data.isReady(NoteStructuredData.keyDataKind) &&
             data.isReady(NoteStructuredData.mindMapKind));
+    final currentKind = _analysisKind(_page);
+    final canClear = currentKind != null && data.isReady(currentKind);
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -447,6 +517,21 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
                 HapticFeedback.selectionClick();
                 setState(() => _page = _NotesPage.picker);
               },
+            ),
+          ],
+          if (canClear) ...[
+            const SizedBox(width: 4),
+            TextButton(
+              onPressed: () => _confirmClearAnalysis(currentKind),
+              style: TextButton.styleFrom(
+                foregroundColor: DropColors.muted(context),
+                visualDensity: VisualDensity.compact,
+                textStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+              ),
+              child: const Text('Elimina'),
             ),
           ],
         ],

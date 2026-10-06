@@ -9,7 +9,7 @@ if "dotenv" not in sys.modules:
     dotenv.load_dotenv = lambda *args, **kwargs: None
     sys.modules["dotenv"] = dotenv
 
-from services.llm_service import _normalize_mind_map
+from services.llm_service import _message_text, _normalize_mind_map, apply_analysis_removal
 
 
 class MindMapNormalizeTest(unittest.TestCase):
@@ -90,6 +90,40 @@ class MindMapNormalizeTest(unittest.TestCase):
         }
         kept = _normalize_mind_map([crowded])[0]["visuals"]
         self.assertEqual(len(kept), 2)
+
+    def test_reads_json_from_reasoning_when_content_is_empty(self):
+        text = _message_text(
+            {
+                "content": "",
+                "reasoning": '{"mind_map": [{"title": "Nodo"}]}',
+            }
+        )
+        self.assertIn('"title": "Nodo"', text)
+
+        parts = _message_text(
+            {"content": [{"type": "text", "text": '{"ok": true}'}]}
+        )
+        self.assertEqual(parts, '{"ok": true}')
+
+    def test_removing_one_analysis_does_not_touch_the_others(self):
+        class Note:
+            summary = "## Vecchio"
+            highlights = ["Un punto"]
+            speaker_view = [{"speaker": "Ada", "text": "Ciao"}]
+            mind_map = [{"title": "Nodo"}]
+            key_data = {"location": "Aula"}
+            raw_transcription = "Ciao dal microfono"
+            formatted_transcription = "Ada: Ciao"
+            analysis_state = {"highlights": "ready", "speakers": "ready"}
+
+        note = Note()
+        apply_analysis_removal(note, "speakers")
+        self.assertEqual(note.speaker_view, [])
+        self.assertEqual(note.formatted_transcription, "Ciao dal microfono")
+        self.assertEqual(note.highlights, ["Un punto"])
+        self.assertEqual(note.mind_map, [{"title": "Nodo"}])
+        self.assertEqual(note.analysis_state["speakers"], "removed")
+        self.assertEqual(note.analysis_state["highlights"], "ready")
 
 
 if __name__ == "__main__":

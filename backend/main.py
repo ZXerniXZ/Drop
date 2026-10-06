@@ -40,7 +40,7 @@ from services.job_service import (
     start_optional_analysis_job,
     start_upload_job,
 )
-from services.llm_service import ANALYSIS_KINDS
+from services.llm_service import ANALYSIS_KINDS, apply_analysis_removal
 from services.language_detect_service import detect_language_from_audio
 from services.note_deletion import delete_note_for_user
 from services.quota_service import raise_if_cannot_accept, usage_snapshot
@@ -606,6 +606,23 @@ async def start_note_analysis(
         "note_id": note.id,
         "kind": kind,
     }
+
+
+@app.delete("/notes/{note_id}/analyses/{kind}")
+async def delete_note_analysis(
+    note_id: str,
+    kind: str,
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if kind not in ANALYSIS_KINDS:
+        raise HTTPException(status_code=404, detail="Unknown analysis")
+    note = _get_owned_note(db, note_id, current_user_id)
+    apply_analysis_removal(note, kind)
+    db.add(note)
+    db.commit()
+    db.refresh(note)
+    return note.to_result_dict()
 
 
 @app.post("/notes/{note_id}/reanalyze")
