@@ -69,7 +69,6 @@ class _MindMapViewState extends State<MindMapView> {
     if (oldWidget.title != widget.title || oldWidget.nodes != widget.nodes) {
       _render();
     }
-    _setHitTesting(widget.interactive);
   }
 
   @override
@@ -92,7 +91,7 @@ class _MindMapViewState extends State<MindMapView> {
         return;
       }
     }
-    if (decoded is Map && decoded['type'] == 'ready' && !_ready) {
+    if (decoded is Map && decoded['type'] == 'ready') {
       _ready = true;
       _render();
     }
@@ -119,26 +118,24 @@ class _MindMapViewState extends State<MindMapView> {
   }
 
   void _setHitTesting(bool interactive) {
-    final value = interactive ? 'auto' : 'none';
+    final value = interactive ? '' : 'none';
     _iframe.style.pointerEvents = value;
-    var parent = _iframe.parentElement;
-    for (var depth = 0; depth < 4 && parent != null; depth += 1) {
-      final tag = parent.tagName.toLowerCase();
-      if (tag == 'body' || tag == 'html') break;
-      if (parent.isA<web.HTMLElement>()) {
-        (parent as web.HTMLElement).style.pointerEvents = value;
-      }
-      parent = parent.parentElement;
+    final parent = _iframe.parentElement;
+    if (parent != null &&
+        parent.tagName.toLowerCase() == 'flt-platform-view' &&
+        parent.isA<web.HTMLElement>()) {
+      (parent as web.HTMLElement).style.pointerEvents = value;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!widget.interactive) {
-      _setHitTesting(false);
-      return const SizedBox.expand();
-    }
-    _setHitTesting(true);
-    return HtmlElementView(viewType: _viewType);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _setHitTesting(widget.interactive);
+    });
+    return IgnorePointer(
+      ignoring: !widget.interactive,
+      child: HtmlElementView(viewType: _viewType),
+    );
   }
 }
