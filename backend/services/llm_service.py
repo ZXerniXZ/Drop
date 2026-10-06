@@ -130,11 +130,18 @@ Return ONLY a valid JSON object:
 
 Rules:
 - Write every title, body, and visual title in {output_language}.
-- The map is a tree of titles. The body is the explanation opened from a title. Make it specific: what was said, why it matters, and the formula or relation when one was mentioned.
+- Follow the recording in order. Do not regroup by theme, importance, or similarity.
+- The first subject the speaker actually develops is the first top-level point.
+- When the speaker leaves that subject for a different one, the new subject is the next top-level point.
+- When the speaker stays on the current subject and adds a detail, example, step, formula, or caveat, that addition is a child of the current point.
+- When the speaker returns to an earlier subject, add the new material as a child of that existing point. Do not open a second top-level point for a subject already in the tree.
+- Under one parent, children stay in the order they were said.
+- The body is the explanation opened from a title. Make it specific: what was said at that moment, why it matters, and the formula or relation when one was mentioned.
 - title: one line, max 60 characters, no math, no markdown.
 - body: markdown. Use $...$ for inline math and $$...$$ on their own line for a display formula. No other math delimiters.
 - children: nested points with the same shape. Depth at most 4, counting the top-level points as level 1. Use [] when a point has no children.
-- 3 to 10 top-level points. Follow what was actually said. Do not invent facts, numbers, or formulas that were not in the transcript.
+- One top-level point per subject change. A short note may have two; a long lesson may have more. Do not invent extra points to fill a quota, and do not merge two subjects into one point.
+- Do not invent facts, numbers, or formulas that were not in the transcript.
 - A point may have an empty body when it only groups its children.
 - visuals: 0 to 2 items, and only when a graph makes the explanation clearer. Each item is one of:
   - {{"kind":"plot2d","title":"optional","expressions":["x^2"],"x":[-2,2]}}

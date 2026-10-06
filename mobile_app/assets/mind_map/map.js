@@ -4,6 +4,7 @@
   const sheetTitle = document.getElementById('sheet-title');
   const sheetBody = document.getElementById('sheet-body');
   const sheetVisuals = document.getElementById('sheet-visuals');
+  const sheetScroll = document.getElementById('sheet-scroll');
   const byId = new Map();
   let mm = null;
   let dark = false;
@@ -78,12 +79,13 @@
   }
 
   function options() {
+    const wide = window.innerWidth >= 960;
     return {
       duration: 200,
-      maxWidth: 260,
-      spacingVertical: 12,
-      spacingHorizontal: 80,
-      paddingX: 12,
+      maxWidth: wide ? 420 : 200,
+      spacingVertical: wide ? 18 : 10,
+      spacingHorizontal: wide ? 140 : 56,
+      paddingX: wide ? 16 : 8,
       initialExpandLevel: 2,
       scrollForPan: false,
       color: function () { return lineColor(); },
@@ -137,27 +139,83 @@
     return values;
   }
 
-  function plotLayout(title) {
-    const ink = inkColor();
-    const grid = gridColor();
-    const paper = panelColor();
+  function isWide() {
+    return window.innerWidth >= 960;
+  }
+
+  function plotBox(host) {
+    const width = Math.max(1, Math.floor(host.clientWidth || host.parentElement.clientWidth || 280));
+    const height = isWide()
+      ? Math.round(Math.min(460, Math.max(300, window.innerHeight * 0.5)))
+      : Math.round(Math.min(210, Math.max(150, window.innerHeight * 0.3)));
+    host.style.height = height + 'px';
+    return { width: width, height: height };
+  }
+
+  function axisStyle() {
     return {
-      title: title ? { text: title, font: { size: 13, color: ink } } : undefined,
+      color: mutedColor(),
+      gridcolor: gridColor(),
+      zerolinecolor: gridColor(),
+      automargin: true,
+      tickfont: { size: isWide() ? 12 : 10, color: mutedColor() },
+    };
+  }
+
+  function plotLayout() {
+    const ink = inkColor();
+    const paper = panelColor();
+    const margin = isWide()
+      ? { l: 48, r: 16, t: 16, b: 40 }
+      : { l: 28, r: 6, t: 8, b: 24 };
+    return {
       paper_bgcolor: paper,
       plot_bgcolor: paper,
-      font: { color: ink, family: 'sans-serif', size: 12 },
-      margin: { l: 42, r: 12, t: title ? 32 : 12, b: 36 },
-      xaxis: { color: mutedColor(), gridcolor: grid, zerolinecolor: grid },
-      yaxis: { color: mutedColor(), gridcolor: grid, zerolinecolor: grid },
-      legend: { font: { color: ink, size: 11 } },
+      font: { color: ink, family: 'sans-serif', size: isWide() ? 13 : 11 },
+      margin: margin,
+      xaxis: axisStyle(),
+      yaxis: axisStyle(),
+      legend: {
+        font: { color: ink, size: 11 },
+        bgcolor: 'rgba(0,0,0,0)',
+        orientation: 'h',
+        x: 0,
+        y: 1,
+        xanchor: 'left',
+        yanchor: 'top',
+      },
+    };
+  }
+
+  function sceneAxes() {
+    const ink = inkColor();
+    const size = isWide() ? 11 : 9;
+    const axis = {
+      color: ink,
+      gridcolor: gridColor(),
+      backgroundcolor: panelColor(),
+      tickfont: { size: size, color: ink },
+      titlefont: { size: size, color: ink },
+      showspikes: false,
+    };
+    return {
+      xaxis: axis,
+      yaxis: Object.assign({}, axis),
+      zaxis: Object.assign({}, axis),
+      bgcolor: panelColor(),
+      aspectmode: 'cube',
     };
   }
 
   function showPlot(host, figure, layout) {
+    const box = plotBox(host);
+    layout.width = box.width;
+    layout.height = box.height;
     window.Plotly.newPlot(host, figure, layout, {
       displayModeBar: false,
-      responsive: true,
+      responsive: false,
       scrollZoom: false,
+      staticPlot: false,
     });
   }
 
@@ -195,7 +253,7 @@
           line: { color: index === 0 ? ink : mutedColor(), width: 1.5 },
         };
       });
-      const layout = plotLayout('');
+      const layout = plotLayout();
       layout.showlegend = traces.length > 1;
       showPlot(host, traces, layout);
     });
@@ -210,14 +268,9 @@
         return xs.map(function (x) { return finite(compiled.evaluate({ x: x, y: y })); });
       });
       const ink = inkColor();
-      const layout = plotLayout('');
-      layout.scene = {
-        xaxis: { color: ink, gridcolor: gridColor(), backgroundcolor: panelColor() },
-        yaxis: { color: ink, gridcolor: gridColor(), backgroundcolor: panelColor() },
-        zaxis: { color: ink, gridcolor: gridColor(), backgroundcolor: panelColor() },
-        bgcolor: panelColor(),
-      };
-      layout.margin = { l: 0, r: 0, t: 8, b: 0 };
+      const layout = plotLayout();
+      layout.scene = sceneAxes();
+      layout.margin = { l: 0, r: 0, t: 0, b: 0 };
       showPlot(host, [{
         type: 'surface',
         x: xs,
@@ -235,15 +288,10 @@
       const yExpr = compileExpr(visual.y);
       const zExpr = compileExpr(visual.z);
       const ts = linspace(visual.t, 160);
-      const layout = plotLayout('');
+      const layout = plotLayout();
       const ink = inkColor();
-      layout.scene = {
-        xaxis: { color: ink, gridcolor: gridColor(), backgroundcolor: panelColor() },
-        yaxis: { color: ink, gridcolor: gridColor(), backgroundcolor: panelColor() },
-        zaxis: { color: ink, gridcolor: gridColor(), backgroundcolor: panelColor() },
-        bgcolor: panelColor(),
-      };
-      layout.margin = { l: 0, r: 0, t: 8, b: 0 };
+      layout.scene = sceneAxes();
+      layout.margin = { l: 0, r: 0, t: 0, b: 0 };
       showPlot(host, [{
         type: 'scatter3d',
         mode: 'lines',
@@ -279,7 +327,7 @@
           marker: { color: color },
         };
       });
-      const layout = plotLayout('');
+      const layout = plotLayout();
       layout.showlegend = traces.length > 1;
       layout.barmode = 'group';
       showPlot(host, traces, layout);
@@ -322,8 +370,11 @@
       });
     }
     sheetVisuals.innerHTML = '';
-    visuals.forEach(renderVisual);
+    sheetScroll.classList.toggle('has-visuals', visuals.length > 0);
     sheet.hidden = false;
+    requestAnimationFrame(function () {
+      visuals.forEach(renderVisual);
+    });
   }
 
   window.DropMap = {
@@ -353,7 +404,17 @@
   });
 
   document.getElementById('sheet-close').addEventListener('click', closeSheet);
-  document.getElementById('sheet-backdrop').addEventListener('click', closeSheet);
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && !sheet.hidden) closeSheet();
+  });
+  window.addEventListener('resize', function () {
+    if (sheet.hidden || !window.Plotly) return;
+    sheetVisuals.querySelectorAll('.plot').forEach(function (host) {
+      if (!host.data) return;
+      const box = plotBox(host);
+      window.Plotly.relayout(host, { width: box.width, height: box.height });
+    });
+  });
 
   window.addEventListener('message', function (event) {
     let data = event.data;
