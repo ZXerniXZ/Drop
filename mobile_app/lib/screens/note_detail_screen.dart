@@ -44,25 +44,92 @@ class NoteDetailScreen extends StatefulWidget {
   State<NoteDetailScreen> createState() => _NoteDetailScreenState();
 }
 
-class _NoteDetailScreenState extends State<NoteDetailScreen> {
+class _NoteDetailScreenState extends State<NoteDetailScreen>
+    with TickerProviderStateMixin {
   _DetailMode _mode = _DetailMode.notes;
   _NotesPage _page = _NotesPage.summary;
   late AudioNote _note;
   final _askAiController = TextEditingController();
   final _running = <String>{};
   final _mindMap = MindMapHandle();
+  final _notesStackKey = GlobalKey();
+  final _sectionKeys = <_NotesPage, GlobalKey>{};
+  late final AnimationController _actions;
+  String? _actionKind;
+  double? _actionCenter;
   var _mindMapInteractive = true;
 
   @override
   void initState() {
     super.initState();
     _note = widget.note;
+    _actions = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 380),
+    );
   }
 
   @override
   void dispose() {
+    _actions.dispose();
     _askAiController.dispose();
     super.dispose();
+  }
+
+  GlobalKey _sectionKey(_NotesPage page) {
+    return _sectionKeys.putIfAbsent(page, GlobalKey.new);
+  }
+
+  bool _actionsOnClick(BuildContext context) {
+    return MediaQuery.sizeOf(context).width >= 900;
+  }
+
+  void _openActions(String kind) {
+    setState(() => _actionKind = kind);
+    _actions.forward(from: 0);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _placeActions();
+    });
+  }
+
+  void _closeActions() {
+    if (_actionKind == null) return;
+    setState(() => _actionKind = null);
+  }
+
+  void _placeActions() {
+    final tabContext = _sectionKeys[_page]?.currentContext;
+    final stackContext = _notesStackKey.currentContext;
+    if (tabContext == null || stackContext == null) return;
+    final tabBox = tabContext.findRenderObject() as RenderBox?;
+    final stackBox = stackContext.findRenderObject() as RenderBox?;
+    if (tabBox == null ||
+        stackBox == null ||
+        !tabBox.hasSize ||
+        !stackBox.hasSize) {
+      return;
+    }
+    final tab = tabBox.localToGlobal(Offset.zero);
+    final stack = stackBox.localToGlobal(Offset.zero);
+    final center = tab.dx - stack.dx + tabBox.size.width / 2;
+    if (center == _actionCenter) return;
+    setState(() => _actionCenter = center);
+  }
+
+  void _onSectionTap(_NotesPage page) {
+    final kind = _analysisKind(page);
+    if (_actionsOnClick(context) && _page == page && kind != null) {
+      if (_actionKind == kind) {
+        _closeActions();
+      } else {
+        _openActions(kind);
+      }
+      return;
+    }
+    setState(() {
+      _page = page;
+      _actionKind = null;
+    });
   }
 
   Future<void> _confirmDelete() async {
@@ -377,14 +444,30 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
             if (_mode == _DetailMode.notes && _page != _NotesPage.picker)
               _buildSectionBar(context),
             Expanded(
-              child: _mode == _DetailMode.sources
-                  ? NoteAudioPlayer(
-                      noteId: _note.id,
-                      audioPath: _note.audioPath,
-                      fallbackDurationSeconds: _note.durationSeconds,
-                      segments: _note.transcriptSegments,
-                    )
-                  : _buildNotesBody(context),
+              child: Stack(
+                key: _notesStackKey,
+                children: [
+                  Positioned.fill(
+                    child: _mode == _DetailMode.sources
+                        ? NoteAudioPlayer(
+                            noteId: _note.id,
+                            audioPath: _note.audioPath,
+                            fallbackDurationSeconds: _note.durationSeconds,
+                            segments: _note.transcriptSegments,
+                          )
+                        : _buildNotesBody(context),
+                  ),
+                  if (_actionKind != null) ...[
+                    Positioned.fill(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.translucent,
+                        onTap: _closeActions,
+                      ),
+                    ),
+                    _sectionActionBubbles(context),
+                  ],
+                ],
+              ),
             ),
             AskAiBar(
               controller: _askAiController,
@@ -527,9 +610,10 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
           for (var i = 0; i < tabs.length; i++) ...[
             if (i > 0) const SizedBox(width: 8),
             _TabPill(
+              key: _sectionKey(tabs[i].page),
               label: tabs[i].label,
               isActive: _page == tabs[i].page,
-              onTap: () => setState(() => _page = tabs[i].page),
+              onTap: () => _onSectionTap(tabs[i].page),
             ),
           ],
           if (showAdd) ...[
@@ -537,7 +621,10 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
             _AddPill(
               onTap: () {
                 HapticFeedback.selectionClick();
-                setState(() => _page = _NotesPage.picker);
+                setState(() {
+                  _page = _NotesPage.picker;
+                  _actionKind = null;
+                });
               },
             ),
           ],
@@ -584,7 +671,7 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
               handle: _mindMap,
               title: _note.title,
               nodes: _note.structuredData.mindMap,
-              interactive: _mindMapInteractive,
+              interactive: _mindMapInteractive && _actionKind == null,
             ),
           ),
         ],
@@ -627,6 +714,33 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
       ],
     );
   }
+
+  Widget _sectionActionBubbles(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    const slot = 240.0;
+    final center = _actionCenter ?? 88;
+    final maxLeft = width - slot - 12;
+    var left = center - slot / 2;
+    if (left < 12) left = 12;
+    if (maxLeft >= 12 && left > maxLeft) left = maxLeft;
+    final kind = _actionKind;
+    return Positioned(
+      top: 4,
+      left: left,
+      width: slot,
+      child: _DroppingActions(
+        animation: _actions,
+        onRegenerate: () {
+          _closeActions();
+          if (kind != null) _regenerateAnalysis(kind);
+        },
+        onDelete: () {
+          _closeActions();
+          if (kind != null) _confirmClearAnalysis(kind);
+        },
+      ),
+    );
+  }
 }
 
 class _MindMapToolbar extends StatelessWidget {
@@ -663,6 +777,7 @@ class _MindMapToolbar extends StatelessWidget {
 
 class _TabPill extends StatelessWidget {
   const _TabPill({
+    super.key,
     required this.label,
     required this.isActive,
     required this.onTap,
@@ -814,6 +929,108 @@ class _ModeButton extends StatelessWidget {
                 color: isActive
                     ? Theme.of(context).colorScheme.onSurface
                     : DropColors.muted(context),
+              ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DroppingActions extends StatelessWidget {
+  const _DroppingActions({
+    required this.animation,
+    required this.onRegenerate,
+    required this.onDelete,
+  });
+
+  final Animation<double> animation;
+  final VoidCallback onRegenerate;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, _) {
+        final t = Curves.easeOutBack.transform(animation.value).clamp(0.0, 1.0);
+        final spread = 6 + 58 * t;
+        final scale = 0.3 + 0.7 * t;
+        return SizedBox(
+          height: 48,
+          child: Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.topCenter,
+            children: [
+              Transform.translate(
+                offset: Offset(-spread, 0),
+                child: Transform.scale(
+                  scale: scale,
+                  alignment: Alignment.topCenter,
+                  child: _ActionBubble(
+                    label: 'Rigenera',
+                    onTap: onRegenerate,
+                  ),
+                ),
+              ),
+              Transform.translate(
+                offset: Offset(spread, 0),
+                child: Transform.scale(
+                  scale: scale,
+                  alignment: Alignment.topCenter,
+                  child: _ActionBubble(
+                    label: 'Elimina',
+                    danger: true,
+                    onTap: onDelete,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ActionBubble extends StatelessWidget {
+  const _ActionBubble({
+    required this.label,
+    required this.onTap,
+    this.danger = false,
+  });
+
+  final String label;
+  final VoidCallback onTap;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: isDark ? DropColors.darkSurface : DropColors.lightSurface,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: DropColors.border(context)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.28 : 0.06),
+              blurRadius: 16,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Text(
+          label,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                letterSpacing: 0.2,
+                color: danger
+                    ? DropColors.recordRed
+                    : Theme.of(context).colorScheme.onSurface,
               ),
         ),
       ),
