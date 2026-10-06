@@ -12,6 +12,8 @@ class NoteListCard extends StatelessWidget {
     required this.onTap,
     required this.onDelete,
     this.onRetry,
+    this.folderLabel,
+    this.longPressToDelete = true,
   });
 
   final AudioNote note;
@@ -19,6 +21,11 @@ class NoteListCard extends StatelessWidget {
   final VoidCallback? onTap;
   final VoidCallback onDelete;
   final VoidCallback? onRetry;
+  final String? folderLabel;
+
+  /// In home il tocco prolungato sposta la nota, quindi la conferma di
+  /// eliminazione resta sullo swipe.
+  final bool longPressToDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -43,7 +50,9 @@ class NoteListCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(16),
       child: _PressableCard(
         onTap: onTap,
-        onLongPress: isProcessing ? null : () => _confirmDelete(context),
+        onLongPress: longPressToDelete && !isProcessing
+            ? () => _confirmDelete(context)
+            : null,
         borderRadius: BorderRadius.circular(16),
         child: Opacity(
           opacity: isProcessing ? 0.75 : 1,
@@ -172,6 +181,8 @@ class NoteListCard extends StatelessWidget {
                     dateLabel,
                     if (note.durationLabel.isNotEmpty) note.durationLabel,
                     note.tag,
+                    if (folderLabel != null && folderLabel!.isNotEmpty)
+                      folderLabel!,
                   ].join(' · '),
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         letterSpacing: 0.2,

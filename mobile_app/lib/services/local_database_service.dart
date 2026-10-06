@@ -3,6 +3,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../models/audio_note.dart';
 import '../models/note_chat_message.dart';
+import '../models/note_folder.dart';
 
 class LocalDatabaseService {
   LocalDatabaseService._();
@@ -19,7 +20,7 @@ class LocalDatabaseService {
 
     _db = await openDatabase(
       path,
-      version: 10,
+      version: 11,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE audio_notes (
@@ -43,11 +44,13 @@ class LocalDatabaseService {
             analysis_total INTEGER NOT NULL DEFAULT 0,
             analysis_job_id TEXT,
             source_language TEXT,
-            output_language TEXT
+            output_language TEXT,
+            folder_id TEXT
           )
         ''');
         await _createChatTable(db);
         await _createDeletedNotesTable(db);
+        await _createFoldersTable(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -112,8 +115,22 @@ class LocalDatabaseService {
             'ALTER TABLE audio_notes ADD COLUMN analysis_job_id TEXT',
           );
         }
+        if (oldVersion < 11) {
+          await db.execute('ALTER TABLE audio_notes ADD COLUMN folder_id TEXT');
+          await _createFoldersTable(db);
+        }
       },
     );
+  }
+
+  static Future<void> _createFoldersTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS note_folders (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    ''');
   }
 
   static Future<void> _createDeletedNotesTable(Database db) async {
@@ -278,10 +295,44 @@ class LocalDatabaseService {
     );
   }
 
+  Future<List<NoteFolder>> getAllFolders() async {
+    final rows = await _database.query(
+      'note_folders',
+      orderBy: 'created_at ASC',
+    );
+    return rows.map(NoteFolder.fromMap).toList();
+  }
+
+  Future<void> saveFolder(NoteFolder folder) async {
+    await _database.insert(
+      'note_folders',
+      folder.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// Cancella la cartella e riporta le sue note nella home.
+  Future<void> deleteFolder(String id) async {
+    await _database.transaction((txn) async {
+      await txn.update(
+        'audio_notes',
+        {'folder_id': null},
+        where: 'folder_id = ?',
+        whereArgs: [id],
+      );
+      await txn.delete(
+        'note_folders',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    });
+  }
+
   Future<void> deleteAllUserData() async {
     await _database.delete('note_chat_messages');
     await _database.delete('audio_notes');
     await _database.delete('deleted_notes');
+    await _database.delete('note_folders');
   }
 
   Future<void> clearDeletedNotes() async {

@@ -20,6 +20,7 @@ import '../services/app_identity.dart';
 import '../services/app_preferences_service.dart';
 import '../services/app_update_service.dart';
 import '../models/note_filters.dart';
+import '../models/note_folder.dart';
 import '../services/chunked_upload_service.dart';
 import '../services/drop_api_headers.dart';
 import '../services/audio_binary_store.dart';
@@ -39,9 +40,10 @@ import '../services/server_quota_service.dart';
 import '../services/supabase_auth_service.dart';
 import '../theme/drop_motion.dart';
 import '../theme/drop_theme.dart';
-import '../utils/note_filter_utils.dart';
+import '../utils/note_library.dart';
 import '../widgets/analysis_language_dialog.dart';
 import '../widgets/note_filter_bar.dart';
+import '../widgets/note_folder_section.dart';
 import '../widgets/drop_bottom_nav.dart';
 import '../widgets/drop_logo.dart';
 import '../widgets/note_list_card.dart';
@@ -73,6 +75,9 @@ class _RecorderScreenState extends State<RecorderScreen>
   final TextEditingController _searchController = TextEditingController();
 
   List<AudioNote> _notes = [];
+  List<NoteFolder> _folders = [];
+  String? _openFolderId;
+  String? _draggingNoteId;
   final Set<String> _deletedNoteIds = {};
   final Set<String> _watchingNoteIds = {};
   NoteFilters _filters = const NoteFilters();
@@ -94,7 +99,21 @@ class _RecorderScreenState extends State<RecorderScreen>
   RecordConfig _recordConfig = AudioRecordingConfig.recordConfig;
   bool _stopping = false;
 
-  List<AudioNote> get _filteredNotes => applyNoteFilters(_notes, _filters);
+  NoteFolder? get _openFolder {
+    final id = _openFolderId;
+    if (id == null) return null;
+    for (final folder in _folders) {
+      if (folder.id == id) return folder;
+    }
+    return null;
+  }
+
+  List<AudioNote> get _visibleNotes => visibleLibraryNotes(
+        notes: _notes,
+        openFolderId: _openFolder?.id,
+        filters: _filters,
+        knownFolderIds: {for (final folder in _folders) folder.id},
+      );
 
   @override
   void initState() {
@@ -195,9 +214,15 @@ class _RecorderScreenState extends State<RecorderScreen>
     }
     await _loadTags();
     final notes = await LocalDatabaseService.instance.getAllNotes();
+    final folders = await LocalDatabaseService.instance.getAllFolders();
     if (!mounted) return;
     setState(() {
       _notes = _withoutDeleted(notes);
+      _folders = folders;
+      if (_openFolderId != null &&
+          !folders.any((folder) => folder.id == _openFolderId)) {
+        _openFolderId = null;
+      }
       _isLoadingNotes = false;
     });
     unawaited(_syncNotesFromCloud());
@@ -1377,6 +1402,7 @@ class _RecorderScreenState extends State<RecorderScreen>
         tag: 'Memo',
         analysisStatus: NoteAnalysisStatus.processing,
         analysisPhase: NoteAnalysisPhase.uploading,
+        folderId: _activeTab == DropNavTab.file ? _openFolder?.id : null,
       );
 
       await LocalDatabaseService.instance.saveNote(placeholder);
@@ -1668,6 +1694,95 @@ class _RecorderScreenState extends State<RecorderScreen>
     );
   }
 
+  Future<void> _createFolder() async {
+    final name = await showCreateFolderDialog(context);
+    if (name == null || !mounted) return;
+    final folder = NoteFolder(
+      id: 'folder_${DateTime.now().microsecondsSinceEpoch}',
+      name: name,
+      createdAt: DateTime.now(),
+    );
+    await LocalDatabaseService.instance.saveFolder(folder);
+    if (!mounted) return;
+    setState(() => _folders.add(folder));
+  }
+
+  Future<void> _confirmDeleteFolder(NoteFolder folder) async {
+    final confirmed = await confirmDeleteFolder(context, folder.name);
+    if (!confirmed || !mounted) return;
+    await LocalDatabaseService.instance.deleteFolder(folder.id);
+    if (!mounted) return;
+    setState(() {
+      _folders.removeWhere((item) => item.id == folder.id);
+      _notes = [
+        for (final note in _notes)
+          if (note.folderId == folder.id)
+            note.copyWith(clearFolder: true)
+          else
+            note,
+      ];
+      if (_openFolderId == folder.id) _openFolderId = null;
+    });
+  }
+
+  Future<void> _moveNoteToFolder(String noteId, String? folderId) async {
+    final index = _notes.indexWhere((note) => note.id == noteId);
+    if (index == -1) return;
+    final note = _notes[index];
+    if ((note.folderId ?? '') == (folderId ?? '')) return;
+
+    final updated = folderId == null
+        ? note.copyWith(clearFolder: true)
+        : note.copyWith(folderId: folderId);
+    try {
+      await LocalDatabaseService.instance.saveNote(updated);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Spostamento non riuscito: $error')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    HapticFeedback.selectionClick();
+    String? folderName;
+    if (folderId != null) {
+      for (final folder in _folders) {
+        if (folder.id == folderId) folderName = folder.name;
+      }
+    }
+    setState(() => _notes[index] = updated);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          folderName == null
+              ? 'Nota spostata fuori dalla cartella'
+              : 'Nota spostata in $folderName',
+        ),
+      ),
+    );
+  }
+
+  void _onNoteDragStarted(String noteId) {
+    if (_draggingNoteId == noteId) return;
+    setState(() => _draggingNoteId = noteId);
+  }
+
+  void _onNoteDragEnded() {
+    if (_draggingNoteId == null) return;
+    setState(() => _draggingNoteId = null);
+  }
+
+  String? _folderLabelFor(AudioNote note) {
+    if (_openFolder != null || !_filters.hasActiveFilters) return null;
+    final id = note.folderId;
+    if (id == null || id.isEmpty) return null;
+    for (final folder in _folders) {
+      if (folder.id == id) return folder.name;
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1731,59 +1846,115 @@ class _RecorderScreenState extends State<RecorderScreen>
   }
 
   Widget _buildHeader(BuildContext context) {
+    final folder = _activeTab == DropNavTab.file ? _openFolder : null;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 8, 16, 4),
+      padding: EdgeInsets.fromLTRB(folder == null ? 24 : 4, 8, 16, 4),
       child: Row(
         children: [
-          AnimatedSwitcher(
-            duration: DropMotion.medium,
-            switchInCurve: DropMotion.enter,
-            switchOutCurve: DropMotion.exit,
-            transitionBuilder: (child, animation) => FadeTransition(
-              opacity: animation,
-              child: SlideTransition(
-                position: Tween<Offset>(
-                  begin: const Offset(0, 0.15),
-                  end: Offset.zero,
-                ).animate(animation),
-                child: child,
+          Expanded(
+            child: AnimatedSwitcher(
+              duration: DropMotion.medium,
+              switchInCurve: DropMotion.enter,
+              switchOutCurve: DropMotion.exit,
+              layoutBuilder: (currentChild, previousChildren) {
+                return Stack(
+                  alignment: Alignment.centerLeft,
+                  children: [
+                    ...previousChildren,
+                    ?currentChild,
+                  ],
+                );
+              },
+              transitionBuilder: (child, animation) => FadeTransition(
+                opacity: animation,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, 0.15),
+                    end: Offset.zero,
+                  ).animate(animation),
+                  child: child,
+                ),
               ),
-            ),
-            child: _activeTab == DropNavTab.file
-                ? Row(
-                    key: const ValueKey('file-header'),
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const DropLogo(height: 26),
-                      const SizedBox(width: 10),
-                      Text(
-                        'Drop',
-                        style: Theme.of(context).textTheme.headlineMedium
-                            ?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: -0.3,
+              child: folder != null
+                  ? Row(
+                      key: ValueKey('folder-header-${folder.id}'),
+                      children: [
+                        IconButton(
+                          key: const Key('close-folder'),
+                          tooltip: 'Torna alla home',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => setState(() => _openFolderId = null),
+                          icon: const Icon(Icons.arrow_back_ios_new, size: 18),
+                        ),
+                        Expanded(
+                          child: Text(
+                            folder.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .headlineMedium
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: -0.3,
+                                ),
+                          ),
+                        ),
+                        IconButton(
+                          key: const Key('delete-open-folder'),
+                          tooltip: 'Elimina cartella',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => _confirmDeleteFolder(folder),
+                          icon: Icon(
+                            Icons.delete_outline,
+                            size: 18,
+                            color: DropColors.muted(context),
+                          ),
+                        ),
+                      ],
+                    )
+                  : _activeTab == DropNavTab.file
+                      ? Row(
+                          key: const ValueKey('file-header'),
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const DropLogo(height: 26),
+                            const SizedBox(width: 10),
+                            Text(
+                              'Drop',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .headlineMedium
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: -0.3,
+                                  ),
                             ),
-                      ),
-                    ],
-                  )
-                : Text(
-                    'Impostazioni',
-                    key: const ValueKey('settings-header'),
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: -0.3,
-                    ),
-                  ),
+                          ],
+                        )
+                      : Text(
+                          'Impostazioni',
+                          key: const ValueKey('settings-header'),
+                          style: Theme.of(context)
+                              .textTheme
+                              .headlineMedium
+                              ?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: -0.3,
+                              ),
+                        ),
+            ),
           ),
-          const Spacer(),
-          if (_activeTab == DropNavTab.file)
+          if (_activeTab == DropNavTab.file) ...[
+            const SizedBox(width: 8),
             Text(
-              '${_filteredNotes.length} note',
+              '${_visibleNotes.length} note',
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                 fontSize: 11,
                 color: DropColors.muted(context),
               ),
             ),
+          ],
           const SizedBox(width: 8),
           IconButton(
             onPressed: widget.onToggleTheme,
@@ -1836,6 +2007,59 @@ class _RecorderScreenState extends State<RecorderScreen>
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
     }
 
+    final inFolder = _openFolder != null;
+    return ClipRect(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          AnimatedSwitcher(
+            duration: DropMotion.medium,
+            switchInCurve: DropMotion.enter,
+            switchOutCurve: DropMotion.exit,
+            child: KeyedSubtree(
+              key: ValueKey(_openFolder?.id ?? 'root'),
+              child: _buildLibrary(context),
+            ),
+          ),
+          if (inFolder)
+            Positioned(
+              left: 20,
+              right: 20,
+              bottom: 12,
+              child: MoveOutFolderTarget(
+                visible: _draggingNoteId != null,
+                onAccept: (noteId) => _moveNoteToFolder(noteId, null),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLibrary(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_openFolder == null)
+          NoteFolderBar(
+            folders: _folders,
+            noteCount: (id) => notesInFolderCount(_notes, id),
+            dragging: _draggingNoteId != null,
+            onCreate: _createFolder,
+            onOpen: (folder) => setState(() => _openFolderId = folder.id),
+            onDelete: _confirmDeleteFolder,
+            onDropNote: (noteId, folderId) =>
+                _moveNoteToFolder(noteId, folderId),
+          ),
+        Expanded(child: _buildNoteList(context)),
+      ],
+    );
+  }
+
+  Widget _buildNoteList(BuildContext context) {
+    final notes = _visibleNotes;
+    final inFolder = _openFolder != null;
+
     if (_notes.isEmpty) {
       return _buildEmptyState(
         context,
@@ -1845,7 +2069,7 @@ class _RecorderScreenState extends State<RecorderScreen>
       );
     }
 
-    if (_filteredNotes.isEmpty) {
+    if (notes.isEmpty && _filters.hasActiveFilters) {
       return _buildEmptyState(
         context,
         title: 'Nessun risultato',
@@ -1853,28 +2077,53 @@ class _RecorderScreenState extends State<RecorderScreen>
       );
     }
 
+    if (notes.isEmpty && inFolder) {
+      return _buildEmptyState(
+        context,
+        title: 'Cartella vuota',
+        subtitle:
+            'Torna alla home, tieni premuta una nota e rilasciala su questa cartella.',
+      );
+    }
+
+    if (notes.isEmpty) {
+      return _buildEmptyState(
+        context,
+        title: 'Tutte nelle cartelle',
+        subtitle: 'Apri una cartella per vedere le note.',
+      );
+    }
+
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
-      itemCount: _filteredNotes.length,
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+      itemCount: notes.length,
       separatorBuilder: (_, _) => const SizedBox(height: 16),
       itemBuilder: (context, index) {
-        final note = _filteredNotes[index];
+        final note = notes[index];
         return StaggeredEntrance(
           // Lo stato di swipe e chiusura appartiene alla nota, non alla
           // posizione: senza chiave passerebbe alla card successiva.
           key: ValueKey(note.id),
           index: index,
-          child: NoteSwipeActions(
-            enabled: !note.isProcessing,
-            onShare: () => _shareListedNote(note),
-            onDelete: () => _deleteNote(note),
-            confirmDelete: () => _confirmDeleteNote(note),
-            child: NoteListCard(
-              note: note,
-              dateLabel: _formatNoteDate(note.dateTime),
-              onTap: note.isProcessing ? null : () => _openNoteDetail(note),
+          child: DraggableLibraryNote(
+            noteId: note.id,
+            title: note.title,
+            onDragStarted: () => _onNoteDragStarted(note.id),
+            onDragEnded: _onNoteDragEnded,
+            child: NoteSwipeActions(
+              enabled: !note.isProcessing,
+              onShare: () => _shareListedNote(note),
               onDelete: () => _deleteNote(note),
-              onRetry: note.isFailed ? () => _retryAnalysis(note) : null,
+              confirmDelete: () => _confirmDeleteNote(note),
+              child: NoteListCard(
+                note: note,
+                dateLabel: _formatNoteDate(note.dateTime),
+                onTap: note.isProcessing ? null : () => _openNoteDetail(note),
+                onDelete: () => _deleteNote(note),
+                onRetry: note.isFailed ? () => _retryAnalysis(note) : null,
+                longPressToDelete: false,
+                folderLabel: _folderLabelFor(note),
+              ),
             ),
           ),
         );

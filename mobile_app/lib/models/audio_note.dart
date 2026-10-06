@@ -63,6 +63,7 @@ class AudioNote {
     this.analysisJobId,
     this.sourceLanguage,
     this.outputLanguage,
+    this.folderId,
   });
 
   final String id;
@@ -86,6 +87,9 @@ class AudioNote {
   final String? analysisJobId;
   final String? sourceLanguage;
   final String? outputLanguage;
+
+  /// Cartella locale. Null: la nota sta nella home, fuori da ogni cartella.
+  final String? folderId;
 
   bool get isProcessing => analysisStatus.isProcessing;
 
@@ -154,6 +158,8 @@ class AudioNote {
     bool clearAnalysisJob = false,
     String? sourceLanguage,
     String? outputLanguage,
+    String? folderId,
+    bool clearFolder = false,
   }) {
     return AudioNote(
       id: id ?? this.id,
@@ -183,6 +189,7 @@ class AudioNote {
           clearAnalysisJob ? null : (analysisJobId ?? this.analysisJobId),
       sourceLanguage: sourceLanguage ?? this.sourceLanguage,
       outputLanguage: outputLanguage ?? this.outputLanguage,
+      folderId: clearFolder ? null : (folderId ?? this.folderId),
     );
   }
 
@@ -254,6 +261,7 @@ class AudioNote {
       analysisJobId: map['analysis_job_id'] as String?,
       sourceLanguage: map['source_language'] as String?,
       outputLanguage: map['output_language'] as String?,
+      folderId: map['folder_id'] as String?,
     );
   }
 
@@ -281,6 +289,7 @@ class AudioNote {
       'analysis_job_id': analysisJobId,
       'source_language': sourceLanguage,
       'output_language': outputLanguage,
+      'folder_id': folderId,
     };
   }
 }
