@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
@@ -20,7 +22,7 @@ class LocalDatabaseService {
 
     _db = await openDatabase(
       path,
-      version: 11,
+      version: 13,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE audio_notes (
@@ -51,6 +53,7 @@ class LocalDatabaseService {
         await _createChatTable(db);
         await _createDeletedNotesTable(db);
         await _createFoldersTable(db);
+        await _createLibrarySyncTables(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -119,6 +122,14 @@ class LocalDatabaseService {
           await db.execute('ALTER TABLE audio_notes ADD COLUMN folder_id TEXT');
           await _createFoldersTable(db);
         }
+        if (oldVersion >= 11 && oldVersion < 12) {
+          await db.execute(
+            'ALTER TABLE note_folders ADD COLUMN parent_id TEXT',
+          );
+        }
+        if (oldVersion < 13) {
+          await _createLibrarySyncTables(db);
+        }
       },
     );
   }
@@ -128,7 +139,24 @@ class LocalDatabaseService {
       CREATE TABLE IF NOT EXISTS note_folders (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        parent_id TEXT
+      )
+    ''');
+  }
+
+  static Future<void> _createLibrarySyncTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_outbox (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        payload TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
       )
     ''');
   }
@@ -311,21 +339,150 @@ class LocalDatabaseService {
     );
   }
 
-  /// Cancella la cartella e riporta le sue note nella home.
-  Future<void> deleteFolder(String id) async {
+  /// Cancella le cartelle e sposta le loro note in [moveNotesTo].
+  /// Null le riporta nella home.
+  Future<void> deleteFolders({
+    required Set<String> ids,
+    required String? moveNotesTo,
+  }) async {
+    if (ids.isEmpty) return;
+    final idList = ids.toList();
+    final marks = List.filled(idList.length, '?').join(',');
     await _database.transaction((txn) async {
-      await txn.update(
-        'audio_notes',
-        {'folder_id': null},
-        where: 'folder_id = ?',
-        whereArgs: [id],
+      await txn.rawUpdate(
+        'UPDATE audio_notes SET folder_id = ? WHERE folder_id IN ($marks)',
+        [moveNotesTo, ...idList],
       );
-      await txn.delete(
-        'note_folders',
-        where: 'id = ?',
-        whereArgs: [id],
+      await txn.rawDelete(
+        'DELETE FROM note_folders WHERE id IN ($marks)',
+        idList,
       );
     });
+  }
+
+  Future<void> replaceFolders(List<NoteFolder> folders) async {
+    await _database.transaction((txn) async {
+      await txn.delete('note_folders');
+      for (final folder in folders) {
+        await txn.insert(
+          'note_folders',
+          folder.toMap(),
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+    });
+  }
+
+  Future<void> setNoteFolderId(String noteId, String? folderId) async {
+    await _database.update(
+      'audio_notes',
+      {'folder_id': folderId},
+      where: 'id = ?',
+      whereArgs: [noteId],
+    );
+  }
+
+  Future<void> enqueueLibraryOp({
+    required String kind,
+    required String payload,
+  }) async {
+    await _database.insert('library_outbox', {
+      'kind': kind,
+      'payload': payload,
+    });
+  }
+
+  Future<void> dropPendingFolderUpserts(Set<String> ids) async {
+    if (ids.isEmpty) return;
+    final rows = await _database.query(
+      'library_outbox',
+      where: 'kind = ?',
+      whereArgs: ['upsert_folder'],
+    );
+    for (final row in rows) {
+      final payload = jsonDecode(row['payload'] as String);
+      if (payload is Map && ids.contains(payload['id'])) {
+        await _database.delete(
+          'library_outbox',
+          where: 'seq = ?',
+          whereArgs: [row['seq']],
+        );
+      }
+    }
+  }
+
+  Future<void> dropPendingPlacementsInFolders(Set<String> folderIds) async {
+    if (folderIds.isEmpty) return;
+    final rows = await _database.query(
+      'library_outbox',
+      where: 'kind = ?',
+      whereArgs: ['place_note'],
+    );
+    for (final row in rows) {
+      final payload = jsonDecode(row['payload'] as String);
+      if (payload is Map && folderIds.contains(payload['folder_id'])) {
+        await _database.delete(
+          'library_outbox',
+          where: 'seq = ?',
+          whereArgs: [row['seq']],
+        );
+      }
+    }
+  }
+
+  Future<void> dropPendingNotePlacements(String noteId) async {
+    final rows = await _database.query(
+      'library_outbox',
+      where: 'kind = ?',
+      whereArgs: ['place_note'],
+    );
+    for (final row in rows) {
+      final payload = jsonDecode(row['payload'] as String);
+      if (payload is Map && payload['note_id'] == noteId) {
+        await _database.delete(
+          'library_outbox',
+          where: 'seq = ?',
+          whereArgs: [row['seq']],
+        );
+      }
+    }
+  }
+
+  Future<List<Map<String, Object?>>> pendingLibraryOps() async {
+    return _database.query('library_outbox', orderBy: 'seq ASC');
+  }
+
+  Future<void> removeLibraryOp(int seq) async {
+    await _database.delete(
+      'library_outbox',
+      where: 'seq = ?',
+      whereArgs: [seq],
+    );
+  }
+
+  Future<bool> isLibrarySyncReady() async {
+    final rows = await _database.query(
+      'library_meta',
+      where: 'key = ?',
+      whereArgs: ['synced'],
+      limit: 1,
+    );
+    if (rows.isEmpty) return false;
+    return rows.first['value'] == '1';
+  }
+
+  Future<void> setLibrarySyncReady() async {
+    await _database.insert(
+      'library_meta',
+      {'key': 'synced', 'value': '1'},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> clearLibraryOrganization() async {
+    await _database.delete('note_folders');
+    await _database.delete('library_outbox');
+    await _database.delete('library_meta');
   }
 
   Future<void> deleteAllUserData() async {
@@ -333,6 +490,8 @@ class LocalDatabaseService {
     await _database.delete('audio_notes');
     await _database.delete('deleted_notes');
     await _database.delete('note_folders');
+    await _database.delete('library_outbox');
+    await _database.delete('library_meta');
   }
 
   Future<void> clearDeletedNotes() async {

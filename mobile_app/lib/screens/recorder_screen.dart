@@ -262,12 +262,20 @@ class _RecorderScreenState extends State<RecorderScreen>
   }
 
   Future<void> _syncNotesFromCloud() async {
-    final inserted = await CloudSyncService.instance.syncNotesFromServer();
-    if (inserted == 0 || !mounted) return;
+    final changed = await CloudSyncService.instance.syncNotesFromServer();
+    if (!changed || !mounted) return;
 
     final notes = await LocalDatabaseService.instance.getAllNotes();
+    final folders = await LocalDatabaseService.instance.getAllFolders();
     if (!mounted) return;
-    setState(() => _notes = _withoutDeleted(notes));
+    setState(() {
+      _notes = _withoutDeleted(notes);
+      _folders = folders;
+      if (_openFolderId != null &&
+          !folders.any((folder) => folder.id == _openFolderId)) {
+        _openFolderId = null;
+      }
+    });
   }
 
   /// Una lettura dal database partita prima di una cancellazione puo'
@@ -281,6 +289,9 @@ class _RecorderScreenState extends State<RecorderScreen>
     final index = _notes.indexWhere((n) => n.id == note.id);
     if (index == -1) return;
     setState(() => _notes[index] = note);
+    if (!note.isProcessing) {
+      unawaited(CloudSyncService.instance.pushLibraryOutbox());
+    }
   }
 
   /// Aggiorna la fase mostrata dalla barra di avanzamento della nota.
@@ -1406,6 +1417,15 @@ class _RecorderScreenState extends State<RecorderScreen>
       );
 
       await LocalDatabaseService.instance.saveNote(placeholder);
+      final filedFolderId = placeholder.folderId;
+      if (filedFolderId != null) {
+        unawaited(
+          CloudSyncService.instance.queueNotePlacement(
+            placeholder.id,
+            filedFolderId,
+          ),
+        );
+      }
       if (!mounted) return;
 
       setState(() {
@@ -1694,35 +1714,98 @@ class _RecorderScreenState extends State<RecorderScreen>
     );
   }
 
+  NoteFolder? _folderById(String? id) {
+    final wanted = normalizeFolderId(id);
+    if (wanted == null) return null;
+    for (final folder in _folders) {
+      if (folder.id == wanted) return folder;
+    }
+    return null;
+  }
+
   Future<void> _createFolder() async {
-    final name = await showCreateFolderDialog(context);
+    final parent = _openFolder;
+    final name = await showCreateFolderDialog(
+      context,
+      insideName: parent?.name,
+    );
     if (name == null || !mounted) return;
     final folder = NoteFolder(
       id: 'folder_${DateTime.now().microsecondsSinceEpoch}',
       name: name,
       createdAt: DateTime.now(),
+      parentId: parent?.id,
     );
     await LocalDatabaseService.instance.saveFolder(folder);
+    unawaited(CloudSyncService.instance.queueFolderUpsert(folder));
     if (!mounted) return;
     setState(() => _folders.add(folder));
   }
 
   Future<void> _confirmDeleteFolder(NoteFolder folder) async {
-    final confirmed = await confirmDeleteFolder(context, folder.name);
+    final ids = folderSubtreeIds(_folders, folder.id);
+    final parent = _folderById(folder.parentId);
+    final nested = ids.length > 1;
+    final hasNotes = _notes.any(
+      (note) => note.folderId != null && ids.contains(note.folderId),
+    );
+    final detail = _deleteFolderDetail(
+      name: folder.name,
+      parentName: parent?.name,
+      nested: nested,
+      hasNotes: hasNotes,
+    );
+    final confirmed = await confirmDeleteFolder(context, detail: detail);
     if (!confirmed || !mounted) return;
-    await LocalDatabaseService.instance.deleteFolder(folder.id);
+    final destination = normalizeFolderId(folder.parentId);
+    final movedNoteIds = [
+      for (final note in _notes)
+        if (note.folderId != null && ids.contains(note.folderId)) note.id,
+    ];
+    await LocalDatabaseService.instance.deleteFolders(
+      ids: ids,
+      moveNotesTo: destination,
+    );
+    unawaited(
+      CloudSyncService.instance.queueFolderDelete(
+        folders: List<NoteFolder>.of(_folders),
+        rootId: folder.id,
+        destinationId: destination,
+        movedNoteIds: movedNoteIds,
+      ),
+    );
     if (!mounted) return;
     setState(() {
-      _folders.removeWhere((item) => item.id == folder.id);
+      _folders.removeWhere((item) => ids.contains(item.id));
       _notes = [
         for (final note in _notes)
-          if (note.folderId == folder.id)
-            note.copyWith(clearFolder: true)
+          if (note.folderId != null && ids.contains(note.folderId))
+            destination == null
+                ? note.copyWith(clearFolder: true)
+                : note.copyWith(folderId: destination)
           else
             note,
       ];
-      if (_openFolderId == folder.id) _openFolderId = null;
+      if (_openFolderId != null && ids.contains(_openFolderId)) {
+        _openFolderId = destination;
+      }
     });
+  }
+
+  String _deleteFolderDetail({
+    required String name,
+    required String? parentName,
+    required bool nested,
+    required bool hasNotes,
+  }) {
+    if (!nested && !hasNotes) {
+      return 'Vuoi eliminare "$name"?';
+    }
+    final place = parentName == null ? 'nella home' : 'in "$parentName"';
+    if (nested) {
+      return 'Le note in "$name" e nelle cartelle al suo interno tornano $place.';
+    }
+    return 'Le note in "$name" tornano $place.';
   }
 
   Future<void> _moveNoteToFolder(String noteId, String? folderId) async {
@@ -1744,6 +1827,9 @@ class _RecorderScreenState extends State<RecorderScreen>
       return;
     }
     if (!mounted) return;
+    unawaited(
+      CloudSyncService.instance.queueNotePlacement(noteId, folderId),
+    );
     HapticFeedback.selectionClick();
     String? folderName;
     if (folderId != null) {
@@ -1881,9 +1967,15 @@ class _RecorderScreenState extends State<RecorderScreen>
                       children: [
                         IconButton(
                           key: const Key('close-folder'),
-                          tooltip: 'Torna alla home',
+                          tooltip: normalizeFolderId(folder.parentId) == null
+                              ? 'Torna alla home'
+                              : 'Indietro',
                           visualDensity: VisualDensity.compact,
-                          onPressed: () => setState(() => _openFolderId = null),
+                          onPressed: () => setState(
+                            () => _openFolderId = normalizeFolderId(
+                              folder.parentId,
+                            ),
+                          ),
                           icon: const Icon(Icons.arrow_back_ios_new, size: 18),
                         ),
                         Expanded(
@@ -2028,7 +2120,11 @@ class _RecorderScreenState extends State<RecorderScreen>
               bottom: 12,
               child: MoveOutFolderTarget(
                 visible: _draggingNoteId != null,
-                onAccept: (noteId) => _moveNoteToFolder(noteId, null),
+                parentName: _folderById(_openFolder?.parentId)?.name,
+                onAccept: (noteId) => _moveNoteToFolder(
+                  noteId,
+                  normalizeFolderId(_openFolder?.parentId),
+                ),
               ),
             ),
         ],
@@ -2040,17 +2136,16 @@ class _RecorderScreenState extends State<RecorderScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (_openFolder == null)
-          NoteFolderBar(
-            folders: _folders,
-            noteCount: (id) => notesInFolderCount(_notes, id),
-            dragging: _draggingNoteId != null,
-            onCreate: _createFolder,
-            onOpen: (folder) => setState(() => _openFolderId = folder.id),
-            onDelete: _confirmDeleteFolder,
-            onDropNote: (noteId, folderId) =>
-                _moveNoteToFolder(noteId, folderId),
-          ),
+        NoteFolderBar(
+          folders: foldersIn(_folders, _openFolder?.id),
+          noteCount: (id) => notesInFolderCount(_notes, id),
+          dragging: _draggingNoteId != null,
+          onCreate: _createFolder,
+          onOpen: (folder) => setState(() => _openFolderId = folder.id),
+          onDelete: _confirmDeleteFolder,
+          onDropNote: (noteId, folderId) =>
+              _moveNoteToFolder(noteId, folderId),
+        ),
         Expanded(child: _buildNoteList(context)),
       ],
     );
@@ -2078,11 +2173,13 @@ class _RecorderScreenState extends State<RecorderScreen>
     }
 
     if (notes.isEmpty && inFolder) {
+      final hasChildren = foldersIn(_folders, _openFolder?.id).isNotEmpty;
       return _buildEmptyState(
         context,
-        title: 'Cartella vuota',
-        subtitle:
-            'Torna alla home, tieni premuta una nota e rilasciala su questa cartella.',
+        title: 'Nessuna nota',
+        subtitle: hasChildren
+            ? 'Le note di questa cartella compariranno qui.'
+            : 'Trascina qui una nota, oppure crea una cartella dentro.',
       );
     }
 

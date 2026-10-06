@@ -1,5 +1,6 @@
 import 'package:drop/models/audio_note.dart';
 import 'package:drop/models/note_filters.dart';
+import 'package:drop/models/note_folder.dart';
 import 'package:drop/utils/note_library.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -93,5 +94,41 @@ void main() {
     expect(note.copyWith(clearFolder: true).folderId, isNull);
     expect(note.toMap()['folder_id'], 'folder-1');
     expect(AudioNote.fromMap(note.toMap()).folderId, 'folder-1');
+  });
+
+  test('folders nest and a delete covers the whole branch', () {
+    final created = DateTime.utc(2026, 4, 1);
+    final folders = [
+      NoteFolder(id: 'root', name: 'Lavoro', createdAt: created),
+      NoteFolder(
+        id: 'child',
+        name: 'Clienti',
+        createdAt: created,
+        parentId: 'root',
+      ),
+      NoteFolder(
+        id: 'leaf',
+        name: 'Rossi',
+        createdAt: created,
+        parentId: 'child',
+      ),
+      NoteFolder(id: 'other', name: 'Casa', createdAt: created),
+    ];
+
+    expect(
+      foldersIn(folders, null).map((folder) => folder.id),
+      ['root', 'other'],
+    );
+    expect(
+      foldersIn(folders, 'root').map((folder) => folder.id),
+      ['child'],
+    );
+    expect(folderSubtreeIds(folders, 'root'), {'root', 'child', 'leaf'});
+    expect(folderSubtreeIds(folders, 'child'), {'child', 'leaf'});
+    expect(
+      foldersParentsFirst([folders[2], folders[1], folders[3], folders[0]])
+          .map((folder) => folder.id),
+      ['root', 'child', 'leaf', 'other'],
+    );
   });
 }

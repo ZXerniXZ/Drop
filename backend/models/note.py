@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import DateTime, Float, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, Float, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -55,6 +55,10 @@ class NoteDB(Base):
     source_share_token: Mapped[str | None] = mapped_column(
         String, index=True, nullable=True
     )
+    # Cartella dell'account. folder_assigned distingue "mai impostata"
+    # da "messa esplicitamente in home".
+    folder_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    folder_assigned: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # highlights / speakers / key_data -> "ready" once that analysis has run,
     # even when it found nothing.
     analysis_state: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
@@ -98,5 +102,7 @@ class NoteDB(Base):
             "audio_duration": self.audio_duration,
             "source_language": self.source_language,
             "output_language": self.output_language,
+            "folder_id": self.folder_id,
+            "folder_assigned": bool(self.folder_assigned),
             "created_at": self.created_at.isoformat(),
         }

@@ -18,6 +18,7 @@ from config import AUTH_ADMIN_URL, SERVICE_ROLE_KEY
 from models.deleted_note import DeletedNoteDB
 from models.job import JobDB
 from models.note import NoteDB
+from models.note_folder import NoteFolderDB
 from models.note_share import NoteShareDB
 from models.server_usage import UserServerUsage
 from models.upload_session import UploadSessionDB
@@ -73,6 +74,9 @@ def purge_user_data(db: Session, user_id: str) -> None:
         ).all()
     )
     usage = db.get(UserServerUsage, user_id)
+    folders = list(
+        db.scalars(select(NoteFolderDB).where(NoteFolderDB.user_id == user_id)).all()
+    )
 
     filenames: set[str] = set()
     session_ids: list[str] = []
@@ -96,6 +100,8 @@ def purge_user_data(db: Session, user_id: str) -> None:
         db.delete(job)
     for tombstone in tombstones:
         db.delete(tombstone)
+    for folder in folders:
+        db.delete(folder)
     if usage is not None:
         db.delete(usage)
     db.commit()
@@ -144,6 +150,7 @@ def build_export_zip(db: Session, user_id: str) -> Path:
             "audio_duration": note.audio_duration,
             "source_language": note.source_language,
             "output_language": note.output_language,
+            "folder_id": note.folder_id,
             "created_at": note.created_at.isoformat(),
             "audio_file": None,
         }
@@ -158,10 +165,22 @@ def build_export_zip(db: Session, user_id: str) -> Path:
     handle = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
     handle.close()
     zip_path = Path(handle.name)
+    folders = [
+        folder.to_dict()
+        for folder in db.scalars(
+            select(NoteFolderDB)
+            .where(NoteFolderDB.user_id == user_id)
+            .order_by(NoteFolderDB.created_at.asc())
+        ).all()
+    ]
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(
             "notes.json",
             json.dumps(payload, ensure_ascii=False, indent=2),
+        )
+        archive.writestr(
+            "folders.json",
+            json.dumps(folders, ensure_ascii=False, indent=2),
         )
         for path, arcname in audio_files:
             archive.write(path, arcname=arcname)

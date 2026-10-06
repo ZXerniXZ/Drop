@@ -17,6 +17,7 @@ from auth import get_current_user
 from database import Base, engine, ensure_schema, get_db
 from models.deleted_note import DeletedNoteDB  # noqa: F401
 from models.note import NoteDB  # noqa: F401
+from models.note_folder import NoteFolderDB  # noqa: F401
 from models.note_share import NoteShareDB  # noqa: F401
 from models.job import JobDB  # noqa: F401
 from models.server_usage import UserServerUsage  # noqa: F401
@@ -42,6 +43,12 @@ from services.job_service import (
 )
 from services.llm_service import ANALYSIS_KINDS, apply_analysis_removal
 from services.language_detect_service import detect_language_from_audio
+from services.folder_service import (
+    delete_folder_tree,
+    list_folders,
+    set_note_folder,
+    upsert_folder,
+)
 from services.note_deletion import delete_note_for_user
 from services.quota_service import raise_if_cannot_accept, usage_snapshot
 from services.share_service import (
@@ -84,6 +91,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class FolderUpsertRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    parent_id: str | None = Field(default=None, max_length=80)
+    created_at: str | None = None
+
+
+class NoteFolderPlacement(BaseModel):
+    folder_id: str | None = Field(default=None, max_length=80)
 
 
 class NoteAnalysisRequest(BaseModel):
@@ -534,6 +551,52 @@ async def list_notes(
     )
     notes = db.scalars(stmt).all()
     return [note.to_result_dict() for note in notes]
+
+
+@app.get("/folders")
+async def get_folders(
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return list_folders(db, current_user_id)
+
+
+@app.put("/folders/{folder_id}")
+async def put_folder(
+    folder_id: str,
+    body: FolderUpsertRequest,
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return upsert_folder(
+        db,
+        current_user_id,
+        folder_id,
+        body.name,
+        body.parent_id,
+        body.created_at,
+    )
+
+
+@app.delete("/folders/{folder_id}")
+async def remove_folder(
+    folder_id: str,
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    delete_folder_tree(db, current_user_id, folder_id)
+    return {"success": True}
+
+
+@app.patch("/notes/{note_id}/folder")
+async def move_note_folder(
+    note_id: str,
+    body: NoteFolderPlacement,
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    set_note_folder(db, current_user_id, note_id, body.folder_id)
+    return {"success": True}
 
 
 @app.delete("/notes/{note_id}")

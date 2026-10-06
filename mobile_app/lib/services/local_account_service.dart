@@ -88,6 +88,7 @@ class LocalAccountService {
       await LocalDatabaseService.instance.deleteNote(note.id);
     }
     if (!clearSecrets) return;
+    await LocalDatabaseService.instance.clearLibraryOrganization();
     await LocalDatabaseService.instance.clearDeletedNotes();
     await AppPreferencesService.instance.clearAccountScopedPreferences();
   }

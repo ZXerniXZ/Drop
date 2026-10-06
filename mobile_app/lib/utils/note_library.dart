@@ -1,6 +1,63 @@
 import '../models/audio_note.dart';
+import '../models/note_folder.dart';
 import '../models/note_filters.dart';
 import 'note_filter_utils.dart';
+
+String? normalizeFolderId(String? id) {
+  if (id == null || id.isEmpty) return null;
+  return id;
+}
+
+/// Cartelle direttamente dentro [parentId]. Null è la home.
+List<NoteFolder> foldersIn(List<NoteFolder> folders, String? parentId) {
+  final parent = normalizeFolderId(parentId);
+  return [
+    for (final folder in folders)
+      if (normalizeFolderId(folder.parentId) == parent) folder,
+  ];
+}
+
+/// I genitori prima dei figli, così un invio al server non crea un figlio
+/// prima della cartella che lo contiene.
+List<NoteFolder> foldersParentsFirst(List<NoteFolder> folders) {
+  final byId = {for (final folder in folders) folder.id: folder};
+  final ordered = <NoteFolder>[];
+  final seen = <String>{};
+
+  void visit(NoteFolder folder) {
+    if (!seen.add(folder.id)) return;
+    final parentId = normalizeFolderId(folder.parentId);
+    final parent = parentId == null ? null : byId[parentId];
+    if (parent != null) visit(parent);
+    ordered.add(folder);
+  }
+
+  for (final folder in folders) {
+    visit(folder);
+  }
+  return ordered;
+}
+
+/// La cartella e tutte quelle annidate dentro di lei.
+Set<String> folderSubtreeIds(List<NoteFolder> folders, String rootId) {
+  final childrenOf = <String, List<String>>{};
+  for (final folder in folders) {
+    final parent = normalizeFolderId(folder.parentId);
+    if (parent == null) continue;
+    childrenOf.putIfAbsent(parent, () => []).add(folder.id);
+  }
+
+  final ids = <String>{};
+  void walk(String id) {
+    if (!ids.add(id)) return;
+    for (final child in childrenOf[id] ?? const <String>[]) {
+      walk(child);
+    }
+  }
+
+  walk(rootId);
+  return ids;
+}
 
 /// Note visibili nella home.
 ///

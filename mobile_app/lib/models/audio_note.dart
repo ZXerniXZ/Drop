@@ -228,6 +228,9 @@ class AudioNote {
       durationSeconds: (data['audio_duration'] as num?)?.round() ?? 0,
       sourceLanguage: data['source_language'] as String?,
       outputLanguage: data['output_language'] as String?,
+      folderId: data['folder_assigned'] == true
+          ? data['folder_id'] as String?
+          : null,
     );
   }
 

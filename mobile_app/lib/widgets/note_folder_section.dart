@@ -3,10 +3,8 @@ import 'package:flutter/material.dart';
 import '../models/note_folder.dart';
 import '../theme/drop_motion.dart';
 import '../theme/drop_theme.dart';
-import '../utils/note_library.dart';
 
-/// Barra delle cartelle in home: creazione, apertura, eliminazione e
-/// rilascio di una nota trascinata.
+/// Riga di cartelle: chip sottili, non card.
 class NoteFolderBar extends StatelessWidget {
   const NoteFolderBar({
     super.key,
@@ -30,92 +28,71 @@ class NoteFolderBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 4, bottom: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            height: 78,
-            child: Row(
-              children: [
-                const SizedBox(width: 24),
-                _NewFolderTile(onTap: onCreate),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.only(right: 24),
-                    itemCount: folders.length,
-                    separatorBuilder: (_, _) => const SizedBox(width: 10),
-                    itemBuilder: (context, index) {
-                      final folder = folders[index];
-                      return _FolderTile(
-                        key: ValueKey(folder.id),
-                        folder: folder,
-                        countLabel: folderNotesLabel(noteCount(folder.id)),
-                        dragging: dragging,
-                        onOpen: () => onOpen(folder),
-                        onDelete: () => onDelete(folder),
-                        onDropNote: (noteId) => onDropNote(noteId, folder.id),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (folders.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
-              child: Text(
-                'Tieni premuta una nota e rilasciala su una cartella.',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      fontSize: 11,
-                      color: DropColors.muted(context),
-                    ),
+      padding: const EdgeInsets.only(top: 2, bottom: 4),
+      child: SizedBox(
+        height: 36,
+        child: Row(
+          children: [
+            const SizedBox(width: 24),
+            _NewFolderChip(onTap: onCreate),
+            const SizedBox(width: 8),
+            Expanded(
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.only(right: 24),
+                itemCount: folders.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final folder = folders[index];
+                  return _FolderChip(
+                    key: ValueKey(folder.id),
+                    folder: folder,
+                    noteCount: noteCount(folder.id),
+                    dragging: dragging,
+                    onOpen: () => onOpen(folder),
+                    onDelete: () => onDelete(folder),
+                    onDropNote: (noteId) => onDropNote(noteId, folder.id),
+                  );
+                },
               ),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
-class _NewFolderTile extends StatelessWidget {
-  const _NewFolderTile({required this.onTap});
+class _NewFolderChip extends StatelessWidget {
+  const _NewFolderChip({required this.onTap});
 
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Material(
-      color: isDark ? DropColors.darkSurface : DropColors.lightSurface,
-      borderRadius: BorderRadius.circular(16),
+      color: Colors.transparent,
       child: InkWell(
         key: const Key('create-folder'),
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-          child: Ink(
-          width: 124,
-          height: 78,
+        borderRadius: BorderRadius.circular(17),
+        child: Ink(
+          height: 34,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(17),
             border: Border.all(color: DropColors.border(context)),
           ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.create_new_folder_outlined, size: 20, color: DropColors.muted(context)),
-              const SizedBox(height: 6),
+              Icon(Icons.add, size: 15, color: DropColors.muted(context)),
+              const SizedBox(width: 4),
               Text(
-                'Nuova cartella',
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
+                'Nuova',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
                       color: Theme.of(context).colorScheme.onSurface,
                     ),
               ),
@@ -127,11 +104,11 @@ class _NewFolderTile extends StatelessWidget {
   }
 }
 
-class _FolderTile extends StatelessWidget {
-  const _FolderTile({
+class _FolderChip extends StatelessWidget {
+  const _FolderChip({
     super.key,
     required this.folder,
-    required this.countLabel,
+    required this.noteCount,
     required this.dragging,
     required this.onOpen,
     required this.onDelete,
@@ -139,7 +116,7 @@ class _FolderTile extends StatelessWidget {
   });
 
   final NoteFolder folder;
-  final String countLabel;
+  final int noteCount;
   final bool dragging;
   final VoidCallback onOpen;
   final VoidCallback onDelete;
@@ -158,76 +135,75 @@ class _FolderTile extends StatelessWidget {
             : dragging
                 ? DropColors.recordRed.withValues(alpha: 0.45)
                 : DropColors.border(context);
-        return AnimatedScale(
-          scale: hovered ? 1.04 : 1,
+        return AnimatedContainer(
           duration: DropMotion.fast,
           curve: DropMotion.standard,
-          child: AnimatedContainer(
-            duration: DropMotion.fast,
-            curve: DropMotion.standard,
-            width: 168,
-            height: 78,
-            decoration: BoxDecoration(
-              color: hovered
-                  ? DropColors.recordRed.withValues(alpha: isDark ? 0.16 : 0.08)
-                  : (isDark ? DropColors.darkSurface : DropColors.lightSurface),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: borderColor),
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: onOpen,
-                borderRadius: BorderRadius.circular(16),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.folder_outlined,
-                        size: 22,
-                        color: hovered
-                            ? DropColors.recordRed
-                            : Theme.of(context).colorScheme.onSurface,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              folder.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                  ),
+          height: 34,
+          decoration: BoxDecoration(
+            color: hovered
+                ? DropColors.recordRed.withValues(alpha: isDark ? 0.16 : 0.08)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(17),
+            border: Border.all(color: borderColor),
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onOpen,
+              borderRadius: BorderRadius.circular(17),
+              child: Padding(
+                padding: const EdgeInsets.only(left: 10, right: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.folder_outlined,
+                      size: 15,
+                      color: hovered
+                          ? DropColors.recordRed
+                          : Theme.of(context).colorScheme.onSurface,
+                    ),
+                    const SizedBox(width: 6),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 148),
+                      child: Text(
+                        folder.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: Theme.of(context).colorScheme.onSurface,
                             ),
-                            const SizedBox(height: 2),
-                            Text(
-                              countLabel,
-                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                    color: DropColors.muted(context),
-                                  ),
-                            ),
-                          ],
-                        ),
                       ),
-                      IconButton(
-                        key: Key('delete-folder-${folder.id}'),
-                        tooltip: 'Elimina cartella',
-                        visualDensity: VisualDensity.compact,
-                        onPressed: onDelete,
-                        icon: Icon(
-                          Icons.delete_outline,
-                          size: 16,
-                          color: DropColors.muted(context),
-                        ),
+                    ),
+                    if (noteCount > 0) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        '$noteCount',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              fontSize: 11,
+                              color: DropColors.muted(context),
+                            ),
                       ),
                     ],
-                  ),
+                    Tooltip(
+                      message: 'Elimina cartella',
+                      child: InkWell(
+                        key: Key('delete-folder-${folder.id}'),
+                        onTap: onDelete,
+                        customBorder: const CircleBorder(),
+                        child: Padding(
+                          padding: const EdgeInsets.all(6),
+                          child: Icon(
+                            Icons.close,
+                            size: 13,
+                            color: DropColors.muted(context),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -244,10 +220,14 @@ class MoveOutFolderTarget extends StatelessWidget {
     super.key,
     required this.visible,
     required this.onAccept,
+    this.parentName,
   });
 
   final bool visible;
   final ValueChanged<String> onAccept;
+
+  /// Cartella di livello sopra. Null: la nota torna nella home.
+  final String? parentName;
 
   @override
   Widget build(BuildContext context) {
@@ -270,11 +250,18 @@ class MoveOutFolderTarget extends StatelessWidget {
             onAcceptWithDetails: (details) => onAccept(details.data),
             builder: (context, candidate, rejected) {
               final hovered = candidate.isNotEmpty;
+              final parent = parentName;
+              final restingSubtitle = parent == null
+                  ? 'Rilascia la nota qui'
+                  : 'Torna in $parent';
+              final hoveredSubtitle = parent == null
+                  ? 'La nota torna nella home'
+                  : 'La nota torna in $parent';
               return AnimatedContainer(
                 key: const Key('move-out-folder'),
                 duration: DropMotion.fast,
                 curve: DropMotion.standard,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 decoration: BoxDecoration(
                   color: hovered
                       ? DropColors.recordRed.withValues(alpha: isDark ? 0.22 : 0.1)
@@ -297,8 +284,8 @@ class MoveOutFolderTarget extends StatelessWidget {
                   children: [
                     AnimatedContainer(
                       duration: DropMotion.fast,
-                      width: 36,
-                      height: 36,
+                      width: 32,
+                      height: 32,
                       decoration: BoxDecoration(
                         color: DropColors.recordRed.withValues(
                           alpha: hovered ? 0.18 : 0.1,
@@ -327,9 +314,7 @@ class MoveOutFolderTarget extends StatelessWidget {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            hovered
-                                ? 'La nota torna nella home'
-                                : 'Rilascia la nota qui',
+                            hovered ? hoveredSubtitle : restingSubtitle,
                             style: Theme.of(context).textTheme.labelSmall?.copyWith(
                                   fontSize: 11,
                                   color: DropColors.muted(context),
@@ -419,15 +404,20 @@ class DraggableLibraryNote extends StatelessWidget {
   }
 }
 
-Future<String?> showCreateFolderDialog(BuildContext context) {
+Future<String?> showCreateFolderDialog(
+  BuildContext context, {
+  String? insideName,
+}) {
   return showDialog<String>(
     context: context,
-    builder: (context) => const _CreateFolderDialog(),
+    builder: (context) => _CreateFolderDialog(insideName: insideName),
   );
 }
 
 class _CreateFolderDialog extends StatefulWidget {
-  const _CreateFolderDialog();
+  const _CreateFolderDialog({this.insideName});
+
+  final String? insideName;
 
   @override
   State<_CreateFolderDialog> createState() => _CreateFolderDialogState();
@@ -458,6 +448,16 @@ class _CreateFolderDialogState extends State<_CreateFolderDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (widget.insideName != null) ...[
+            Text(
+              'Dentro ${widget.insideName}',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontSize: 13,
+                    color: DropColors.muted(context),
+                  ),
+            ),
+            const SizedBox(height: 14),
+          ],
           Text(
             'Nome',
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
@@ -506,14 +506,15 @@ class _CreateFolderDialogState extends State<_CreateFolderDialog> {
   }
 }
 
-Future<bool> confirmDeleteFolder(BuildContext context, String name) async {
+Future<bool> confirmDeleteFolder(
+  BuildContext context, {
+  required String detail,
+}) async {
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
       title: const Text('Elimina cartella'),
-      content: Text(
-        'Le note in "$name" tornano nella home.',
-      ),
+      content: Text(detail),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context, false),
