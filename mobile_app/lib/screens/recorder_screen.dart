@@ -109,11 +109,11 @@ class _RecorderScreenState extends State<RecorderScreen>
   }
 
   List<AudioNote> get _visibleNotes => visibleLibraryNotes(
-        notes: _notes,
-        openFolderId: _openFolder?.id,
-        filters: _filters,
-        knownFolderIds: {for (final folder in _folders) folder.id},
-      );
+    notes: _notes,
+    openFolderId: _openFolder?.id,
+    filters: _filters,
+    knownFolderIds: {for (final folder in _folders) folder.id},
+  );
 
   @override
   void initState() {
@@ -130,13 +130,14 @@ class _RecorderScreenState extends State<RecorderScreen>
 
   Future<void> _maybeShowTutorial() async {
     if (!mounted || _isRecording || _isPaused) return;
-    final pending = await AppPreferencesService.instance.loadPendingShareToken();
+    final pending = await AppPreferencesService.instance
+        .loadPendingShareToken();
     if (!mounted || (pending != null && pending.isNotEmpty)) return;
     final seen = await AppPreferencesService.instance.hasSeenTutorial();
     if (!mounted || seen) return;
-    await Navigator.of(context).push(
-      DropPageRoute<void>(page: const TutorialScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(DropPageRoute<void>(page: const TutorialScreen()));
   }
 
   Future<void> _loadOrbStyle() async {
@@ -240,7 +241,9 @@ class _RecorderScreenState extends State<RecorderScreen>
       if (await LocalDatabaseService.instance.noteExists(claimed.id)) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Questa nota e\' gia\' nella tua libreria')),
+          const SnackBar(
+            content: Text('Questa nota e\' gia\' nella tua libreria'),
+          ),
         );
         return;
       }
@@ -255,9 +258,7 @@ class _RecorderScreenState extends State<RecorderScreen>
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
@@ -383,7 +384,10 @@ class _RecorderScreenState extends State<RecorderScreen>
     final title = (data['title'] as String?)?.trim();
     final structured = NoteStructuredData.fromResponse(data);
     final tag = structured.tagLabel.isNotEmpty
-        ? NoteTagsConfig.normalizeTag(structured.tagLabel, allowed: _availableTags)
+        ? NoteTagsConfig.normalizeTag(
+            structured.tagLabel,
+            allowed: _availableTags,
+          )
         : 'Memo';
 
     final segments = TranscriptSegment.listFromResponse(
@@ -458,10 +462,7 @@ class _RecorderScreenState extends State<RecorderScreen>
       late final http.Response response;
       try {
         response = await http
-            .get(
-              Uri.parse(url),
-              headers: DropApiHeaders.auth(accessToken),
-            )
+            .get(Uri.parse(url), headers: DropApiHeaders.auth(accessToken))
             .timeout(const Duration(seconds: 20));
       } on TimeoutException {
         await Future<void>.delayed(pollInterval);
@@ -581,8 +582,9 @@ class _RecorderScreenState extends State<RecorderScreen>
       if (prefs.customPrompt.trim().isNotEmpty) {
         request.fields['custom_prompt'] = prefs.customPrompt.trim();
       }
-      request.fields['noise_reduction'] =
-          prefs.noiseReduction ? 'true' : 'false';
+      request.fields['noise_reduction'] = prefs.noiseReduction
+          ? 'true'
+          : 'false';
       if (durationSeconds > 0) {
         request.fields['duration_seconds'] = '$durationSeconds';
       }
@@ -641,9 +643,7 @@ class _RecorderScreenState extends State<RecorderScreen>
       onSessionProgress: (uploadSessionId, uploadedChunkIndex) async {
         final progressNote = placeholder.copyWith(
           uploadSessionId: uploadSessionId,
-          uploadedChunks: uploadedChunkIndex >= 0
-              ? uploadedChunkIndex + 1
-              : 0,
+          uploadedChunks: uploadedChunkIndex >= 0 ? uploadedChunkIndex + 1 : 0,
         );
         await LocalDatabaseService.instance.saveNote(progressNote);
         if (!mounted) return;
@@ -697,11 +697,16 @@ class _RecorderScreenState extends State<RecorderScreen>
         ? await LocalDatabaseService.instance.getNote(noteId)
         : _notes[index];
     if (placeholder == null) return;
-    final note = _noteFromResponse(
-      result,
-      placeholder: placeholder,
-      audioPath: placeholder.audioPath,
-    ).copyWith(clearUploadSession: true, uploadedChunks: 0, clearAnalysisJob: true);
+    final note =
+        _noteFromResponse(
+          result,
+          placeholder: placeholder,
+          audioPath: placeholder.audioPath,
+        ).copyWith(
+          clearUploadSession: true,
+          uploadedChunks: 0,
+          clearAnalysisJob: true,
+        );
     await LocalDatabaseService.instance.saveNote(note);
     if (!mounted) return;
     _updateNoteInList(note);
@@ -710,7 +715,8 @@ class _RecorderScreenState extends State<RecorderScreen>
   bool _remoteNoteReady(Map<String, dynamic> data) {
     final summary = (data['summary'] as String?)?.trim() ?? '';
     final raw = (data['raw_transcription'] as String?)?.trim() ?? '';
-    final formatted = (data['formatted_transcription'] as String?)?.trim() ?? '';
+    final formatted =
+        (data['formatted_transcription'] as String?)?.trim() ?? '';
     return summary.isNotEmpty || raw.isNotEmpty || formatted.isNotEmpty;
   }
 
@@ -957,17 +963,18 @@ class _RecorderScreenState extends State<RecorderScreen>
           await _persistAudioFile(filePath, noteId) ?? filePath;
       final refreshedIndex = _notes.indexWhere((n) => n.id == noteId);
       placeholder = refreshedIndex == -1 ? placeholder : _notes[refreshedIndex];
-      final note = _noteFromResponse(
-        result,
-        placeholder: placeholder,
-        audioPath: persistedPath,
-      ).copyWith(
-        clearUploadSession: true,
-        uploadedChunks: 0,
-        clearAnalysisJob: true,
-        sourceLanguage: choice.sourceLanguage.id,
-        outputLanguage: choice.outputLanguage.id,
-      );
+      final note =
+          _noteFromResponse(
+            result,
+            placeholder: placeholder,
+            audioPath: persistedPath,
+          ).copyWith(
+            clearUploadSession: true,
+            uploadedChunks: 0,
+            clearAnalysisJob: true,
+            sourceLanguage: choice.sourceLanguage.id,
+            outputLanguage: choice.outputLanguage.id,
+          );
 
       if (apiKey != null && apiKey.isNotEmpty) {
         await NoteShareService.instance.publishNote(
@@ -1074,9 +1081,8 @@ class _RecorderScreenState extends State<RecorderScreen>
     final loader = DialogRoute<void>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => const Center(
-        child: CircularProgressIndicator(strokeWidth: 2),
-      ),
+      builder: (context) =>
+          const Center(child: CircularProgressIndicator(strokeWidth: 2)),
     );
     navigator.push(loader);
     try {
@@ -1099,10 +1105,7 @@ class _RecorderScreenState extends State<RecorderScreen>
                 'Chi apre il link accede a Drop e riceve una copia della nota nella propria libreria.',
               ),
               const SizedBox(height: 12),
-              SelectableText(
-                url,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
+              SelectableText(url, style: Theme.of(context).textTheme.bodySmall),
             ],
           ),
           actions: [
@@ -1128,20 +1131,18 @@ class _RecorderScreenState extends State<RecorderScreen>
       );
       if (!mounted) return;
       if (action == 'copied') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Link copiato')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Link copiato')));
       } else if (action == 'revoked') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Link revocato')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Link revocato')));
       }
     } catch (e) {
       if (loader.isActive) navigator.removeRoute(loader);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
@@ -1219,6 +1220,9 @@ class _RecorderScreenState extends State<RecorderScreen>
       });
       _beginElapsedTicker();
       _pushClockToNotification();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Pausa non disponibile')));
     }
   }
 
@@ -1490,12 +1494,18 @@ class _RecorderScreenState extends State<RecorderScreen>
     _amplitudeSub = null;
     _amplitudeLevel.value = 0;
 
+    String? path;
     try {
-      if (_isPaused) {
-        await _recorder.resume();
+      try {
+        if (_isPaused) await _recorder.resume();
+      } catch (_) {}
+      try {
+        path = await _recorder.stop();
+      } catch (_) {
+        try {
+          path = await _recorder.stop();
+        } catch (_) {}
       }
-
-      final path = await _recorder.stop();
       await RecordingForegroundService.stop();
       await WakelockPlus.disable();
 
@@ -1614,7 +1624,8 @@ class _RecorderScreenState extends State<RecorderScreen>
       processingNotificationText(NoteAnalysisPhase.transcribing),
     );
     try {
-      final apiKey = await AppPreferencesService.instance.loadOpenRouterApiKey();
+      final apiKey = await AppPreferencesService.instance
+          .loadOpenRouterApiKey();
       final jobId = await NoteReanalysisService.instance.requestReanalysis(
         noteId: note.id,
         prefs: analysisPrefs,
@@ -1641,15 +1652,16 @@ class _RecorderScreenState extends State<RecorderScreen>
       );
       if (result == null) return;
 
-      final updated = _noteFromResponse(
-        result,
-        placeholder: processing,
-        audioPath: note.audioPath,
-      ).copyWith(
-        clearAnalysisJob: true,
-        sourceLanguage: choice.sourceLanguage.id,
-        outputLanguage: choice.outputLanguage.id,
-      );
+      final updated =
+          _noteFromResponse(
+            result,
+            placeholder: processing,
+            audioPath: note.audioPath,
+          ).copyWith(
+            clearAnalysisJob: true,
+            sourceLanguage: choice.sourceLanguage.id,
+            outputLanguage: choice.outputLanguage.id,
+          );
       await LocalDatabaseService.instance.saveNote(updated);
       if (!mounted) return;
       _updateNoteInList(updated);
@@ -1827,9 +1839,7 @@ class _RecorderScreenState extends State<RecorderScreen>
       return;
     }
     if (!mounted) return;
-    unawaited(
-      CloudSyncService.instance.queueNotePlacement(noteId, folderId),
-    );
+    unawaited(CloudSyncService.instance.queueNotePlacement(noteId, folderId));
     HapticFeedback.selectionClick();
     String? folderName;
     if (folderId != null) {
@@ -1945,10 +1955,7 @@ class _RecorderScreenState extends State<RecorderScreen>
               layoutBuilder: (currentChild, previousChildren) {
                 return Stack(
                   alignment: Alignment.centerLeft,
-                  children: [
-                    ...previousChildren,
-                    ?currentChild,
-                  ],
+                  children: [...previousChildren, ?currentChild],
                 );
               },
               transitionBuilder: (child, animation) => FadeTransition(
@@ -1983,9 +1990,7 @@ class _RecorderScreenState extends State<RecorderScreen>
                             folder.name,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context)
-                                .textTheme
-                                .headlineMedium
+                            style: Theme.of(context).textTheme.headlineMedium
                                 ?.copyWith(
                                   fontWeight: FontWeight.w600,
                                   letterSpacing: -0.3,
@@ -2006,35 +2011,31 @@ class _RecorderScreenState extends State<RecorderScreen>
                       ],
                     )
                   : _activeTab == DropNavTab.file
-                      ? Row(
-                          key: const ValueKey('file-header'),
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const DropLogo(height: 26),
-                            const SizedBox(width: 10),
-                            Text(
-                              'Drop',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .headlineMedium
-                                  ?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    letterSpacing: -0.3,
-                                  ),
-                            ),
-                          ],
-                        )
-                      : Text(
-                          'Impostazioni',
-                          key: const ValueKey('settings-header'),
-                          style: Theme.of(context)
-                              .textTheme
-                              .headlineMedium
+                  ? Row(
+                      key: const ValueKey('file-header'),
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const DropLogo(height: 26),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Drop',
+                          style: Theme.of(context).textTheme.headlineMedium
                               ?.copyWith(
                                 fontWeight: FontWeight.w600,
                                 letterSpacing: -0.3,
                               ),
                         ),
+                      ],
+                    )
+                  : Text(
+                      'Impostazioni',
+                      key: const ValueKey('settings-header'),
+                      style: Theme.of(context).textTheme.headlineMedium
+                          ?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: -0.3,
+                          ),
+                    ),
             ),
           ),
           if (_activeTab == DropNavTab.file) ...[
@@ -2143,8 +2144,7 @@ class _RecorderScreenState extends State<RecorderScreen>
           onCreate: _createFolder,
           onOpen: (folder) => setState(() => _openFolderId = folder.id),
           onDelete: _confirmDeleteFolder,
-          onDropNote: (noteId, folderId) =>
-              _moveNoteToFolder(noteId, folderId),
+          onDropNote: (noteId, folderId) => _moveNoteToFolder(noteId, folderId),
         ),
         Expanded(child: _buildNoteList(context)),
       ],

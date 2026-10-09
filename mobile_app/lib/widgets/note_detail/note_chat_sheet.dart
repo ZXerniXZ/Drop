@@ -392,7 +392,11 @@ class _StreamingBubble extends StatelessWidget {
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(color: DropColors.border(context)),
                 ),
-                child: DropMarkdown(data: content, fontSize: 13),
+                child: DropMarkdown(
+                  data: content,
+                  fontSize: 13,
+                  renderVisuals: false,
+                ),
               )
             else if (!isStreamingReasoning && reasoning.isEmpty)
               const Padding(

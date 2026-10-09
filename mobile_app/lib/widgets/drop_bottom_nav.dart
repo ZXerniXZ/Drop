@@ -56,53 +56,65 @@ class DropBottomNav extends StatelessWidget {
             .withValues(alpha: 0.95),
         border: Border(top: BorderSide(color: DropColors.border(context))),
       ),
-      padding: const EdgeInsets.fromLTRB(24, 12, 24, 28),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          AnimatedOpacity(
-            duration: DropMotion.medium,
-            opacity: recordingActive ? 0.25 : 1,
-            child: IgnorePointer(
-              ignoring: recordingActive,
-              child: _NavItem(
-                icon: Icons.folder_outlined,
-                label: 'File',
-                isActive: activeTab == DropNavTab.file,
-                onTap: () => onTabChanged(DropNavTab.file),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+      child: SizedBox(
+        height: 112,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned(
+              left: 8,
+              right: 8,
+              bottom: 0,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  AnimatedOpacity(
+                    duration: DropMotion.medium,
+                    opacity: recordingActive ? 0.25 : 1,
+                    child: IgnorePointer(
+                      ignoring: recordingActive,
+                      child: _NavItem(
+                        icon: Icons.folder_outlined,
+                        label: 'File',
+                        isActive: activeTab == DropNavTab.file,
+                        onTap: () => onTabChanged(DropNavTab.file),
+                      ),
+                    ),
+                  ),
+                  AnimatedOpacity(
+                    duration: DropMotion.medium,
+                    opacity: recordingActive ? 0.25 : 1,
+                    child: IgnorePointer(
+                      ignoring: recordingActive,
+                      child: _NavItem(
+                        icon: Icons.person_outline,
+                        label: 'My data',
+                        isActive: activeTab == DropNavTab.settings,
+                        onTap: () => onTabChanged(DropNavTab.settings),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ),
-          Transform.translate(
-            offset: const Offset(0, -20),
-            child: _RecordingControlCluster(
-              isRecording: isRecording,
-              isPaused: isPaused,
-              isArming: isArming,
-              elapsedLabel: elapsedLabel,
-              amplitudeLevel: amplitudeLevel,
-              orbStyle: orbStyle,
-              onStart: onStartRecording,
-              onPauseResume: onPauseResume,
-              onFinish: onFinishRecording,
-              onCancel: onCancelRecording,
-              onLongPress: onOrbPreview,
-            ),
-          ),
-          AnimatedOpacity(
-            duration: DropMotion.medium,
-            opacity: recordingActive ? 0.25 : 1,
-            child: IgnorePointer(
-              ignoring: recordingActive,
-              child: _NavItem(
-                icon: Icons.person_outline,
-                label: 'My data',
-                isActive: activeTab == DropNavTab.settings,
-                onTap: () => onTabChanged(DropNavTab.settings),
+            Positioned.fill(
+              child: _RecordingControlCluster(
+                isRecording: isRecording,
+                isPaused: isPaused,
+                isArming: isArming,
+                elapsedLabel: elapsedLabel,
+                amplitudeLevel: amplitudeLevel,
+                orbStyle: orbStyle,
+                onStart: onStartRecording,
+                onPauseResume: onPauseResume,
+                onFinish: onFinishRecording,
+                onCancel: onCancelRecording,
+                onLongPress: onOrbPreview,
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -160,11 +172,12 @@ class _NavItemState extends State<_NavItem> {
                 duration: DropMotion.medium,
                 curve: DropMotion.standard,
                 style: Theme.of(context).textTheme.labelSmall!.copyWith(
-                      color: color,
-                      fontSize: 10,
-                      fontWeight:
-                          widget.isActive ? FontWeight.w600 : FontWeight.w500,
-                    ),
+                  color: color,
+                  fontSize: 10,
+                  fontWeight: widget.isActive
+                      ? FontWeight.w600
+                      : FontWeight.w500,
+                ),
                 child: Text(widget.label),
               ),
               const SizedBox(height: 6),
@@ -350,129 +363,148 @@ class _RecordingControlClusterState extends State<_RecordingControlCluster>
         final amp = widget.isRecording ? _displayAmp : 0.0;
         final orbShell = lerpDouble(68, 92, expand)!;
         final orbContent = lerpDouble(52, 60, expand)!;
-        final satelliteSpan = lerpDouble(62, 76, expand)!;
         final glow = active
             ? DropGradients.chatGlow(0.7 + amp.clamp(0.0, 0.7) * 0.3)
             : const <BoxShadow>[];
 
-        return SizedBox(
-          width: orbShell + expand * 120,
-          height: widget.elapsedLabel != null
-              ? lerpDouble(88, 102, expand)!
-              : lerpDouble(76, 92, expand)!,
-          child: Stack(
-            clipBehavior: Clip.none,
-            alignment: Alignment.center,
-            children: [
-              _SatelliteButton(
-                expand: expand,
-                offset: -satelliteSpan,
-                icon: widget.isPaused ? Icons.play_arrow_rounded : Icons.pause_rounded,
-                onTap: () {
-                  HapticFeedback.lightImpact();
-                  widget.onPauseResume();
-                },
-              ),
-              _SatelliteButton(
-                expand: expand,
-                offset: satelliteSpan,
-                icon: Icons.close_rounded,
-                onTap: () {
-                  HapticFeedback.lightImpact();
-                  widget.onCancel();
-                },
-              ),
-              Listener(
-                behavior: HitTestBehavior.opaque,
-                onPointerDown: _onOrbPointerDown,
-                onPointerUp: _onOrbPointerUp,
-                onPointerCancel: _onOrbPointerCancel,
-                child: AnimatedScale(
-                  scale: _orbPressed ? 0.94 : 1.0,
-                  duration: DropMotion.fast,
-                  child: Container(
-                    width: orbShell,
-                    height: orbShell,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      boxShadow: glow,
-                    ),
-                    child: Center(
-                      child: SiriOrbMorph(
-                        orbKey: _orbKey,
-                        expand: expand,
-                        isSessionActive: active,
-                        breath: breath,
-                        size: orbContent,
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final center = constraints.maxWidth / 2;
+            final spread = lerpDouble(0, 84, expand)!;
+            final orbTop = lerpDouble(20, 0, expand)!;
+            const button = 48.0;
+
+            return Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned(
+                  left: center - orbShell / 2,
+                  top: orbTop,
+                  width: orbShell,
+                  height: orbShell,
+                  child: Listener(
+                    behavior: HitTestBehavior.opaque,
+                    onPointerDown: _onOrbPointerDown,
+                    onPointerUp: _onOrbPointerUp,
+                    onPointerCancel: _onOrbPointerCancel,
+                    child: AnimatedScale(
+                      scale: _orbPressed ? 0.94 : 1.0,
+                      duration: DropMotion.fast,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          boxShadow: glow,
+                        ),
+                        child: Center(
+                          child: SiriOrbMorph(
+                            orbKey: _orbKey,
+                            expand: expand,
+                            isSessionActive: active,
+                            breath: breath,
+                            size: orbContent,
+                          ),
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              if (widget.elapsedLabel != null && active)
-                Positioned(
-                  bottom: 0,
-                  child: Opacity(
-                    opacity: expand.clamp(0.0, 1.0),
-                    child: Text(
-                      widget.elapsedLabel!,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            fontFeatures: const [FontFeature.tabularFigures()],
-                            fontWeight: FontWeight.w600,
-                            fontSize: 10,
-                            color: widget.isPaused
-                                ? DropColors.muted(context)
-                                : DropGradients.chat[1],
-                          ),
+                if (widget.elapsedLabel != null && active)
+                  Positioned(
+                    top: orbTop + orbShell - 4,
+                    left: center - 36,
+                    width: 72,
+                    child: IgnorePointer(
+                      child: Opacity(
+                        opacity: expand,
+                        child: Text(
+                          widget.elapsedLabel!,
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                                fontWeight: FontWeight.w600,
+                                fontSize: 10,
+                                color: widget.isPaused
+                                    ? DropColors.muted(context)
+                                    : DropGradients.chat[1],
+                              ),
+                        ),
+                      ),
                     ),
                   ),
+                _SideControl(
+                  left: center - spread - button,
+                  top: orbTop + (orbShell - button) / 2,
+                  reveal: expand,
+                  icon: widget.isPaused
+                      ? Icons.play_arrow_rounded
+                      : Icons.pause_rounded,
+                  tooltip: widget.isPaused ? 'Riprendi' : 'Pausa',
+                  buttonKey: const Key('recording-pause'),
+                  onPressed: widget.onPauseResume,
                 ),
-            ],
-          ),
+                _SideControl(
+                  left: center + spread,
+                  top: orbTop + (orbShell - button) / 2,
+                  reveal: expand,
+                  icon: Icons.close_rounded,
+                  tooltip: 'Elimina',
+                  buttonKey: const Key('recording-discard'),
+                  onPressed: widget.onCancel,
+                ),
+              ],
+            );
+          },
         );
       },
     );
   }
 }
 
-class _SatelliteButton extends StatelessWidget {
-  const _SatelliteButton({
-    required this.expand,
-    required this.offset,
+class _SideControl extends StatelessWidget {
+  const _SideControl({
+    required this.left,
+    required this.top,
+    required this.reveal,
     required this.icon,
-    required this.onTap,
+    required this.tooltip,
+    required this.buttonKey,
+    required this.onPressed,
   });
 
-  final double expand;
-  final double offset;
+  final double left;
+  final double top;
+  final double reveal;
   final IconData icon;
-  final VoidCallback onTap;
+  final String tooltip;
+  final Key buttonKey;
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    final t = expand.clamp(0.0, 1.0);
-    final dx = offset * t;
-    final scale = 0.5 + t * 0.5;
-    final color = Theme.of(context).colorScheme.onSurface;
-
+    final t = reveal.clamp(0.0, 1.0);
     return Positioned(
+      left: left,
+      top: top,
+      width: 48,
+      height: 48,
       child: IgnorePointer(
         ignoring: t < 0.85,
-        child: Transform.translate(
-          offset: Offset(dx, 0),
-          child: Transform.scale(
-            scale: scale,
-            child: Opacity(
-              opacity: t,
-              child: GestureDetector(
-                onTap: onTap,
-                behavior: HitTestBehavior.opaque,
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Icon(icon, size: 28, color: color),
-                ),
-              ),
-            ),
+        child: Opacity(
+          opacity: t,
+          child: IconButton(
+            key: buttonKey,
+            tooltip: tooltip,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 48, height: 48),
+            onPressed: () {
+              onPressed();
+              HapticFeedback.lightImpact();
+            },
+            icon: Icon(icon, size: 28),
+            color: Theme.of(context).colorScheme.onSurface,
           ),
         ),
       ),
