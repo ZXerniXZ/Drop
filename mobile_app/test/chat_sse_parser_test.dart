@@ -13,6 +13,21 @@ void main() {
       expect((event! as ChatReasoningDelta).delta, 'Analizzo...');
     });
 
+    test('folds a full SSE body into one reply', () {
+      const body = '''
+data: {"type":"reasoning","delta":"Prima "}
+data: {"type":"reasoning","delta":"parte"}
+data: {"type":"content","delta":"Ciao"}
+data: {"type":"done","reasoning":"Prima parte","content":"Ciao"}
+data: [DONE]
+''';
+      final event = foldServerSse(body);
+      expect(event, isA<ChatStreamDone>());
+      final done = event as ChatStreamDone;
+      expect(done.reasoning, 'Prima parte');
+      expect(done.content, 'Ciao');
+    });
+
     test('parses content and done SSE events', () {
       final content = parseServerSseDataLine(
         'data: {"type":"content","delta":"Ciao"}',

@@ -11,11 +11,7 @@ import 'ask_ai_bar.dart';
 import 'reasoning_accordion.dart';
 
 class NoteChatSheet extends StatefulWidget {
-  const NoteChatSheet({
-    super.key,
-    required this.note,
-    this.initialMessage,
-  });
+  const NoteChatSheet({super.key, required this.note, this.initialMessage});
 
   final AudioNote note;
   final String? initialMessage;
@@ -56,8 +52,9 @@ class _NoteChatSheetState extends State<NoteChatSheet> {
   }
 
   Future<void> _loadMessages() async {
-    final messages =
-        await LocalDatabaseService.instance.getChatMessages(widget.note.id);
+    final messages = await LocalDatabaseService.instance.getChatMessages(
+      widget.note.id,
+    );
     if (!mounted) return;
     setState(() {
       _messages = messages;
@@ -90,58 +87,70 @@ class _NoteChatSheetState extends State<NoteChatSheet> {
     });
     _inputController.clear();
 
-    final userMessage = await NoteChatService.instance.saveUserMessage(
-      noteId: widget.note.id,
-      content: message,
-    );
+    try {
+      final userMessage = await NoteChatService.instance.saveUserMessage(
+        noteId: widget.note.id,
+        content: message,
+      );
 
-    setState(() => _messages = [..._messages, userMessage]);
-    _scrollToBottom();
+      setState(() => _messages = [..._messages, userMessage]);
+      _scrollToBottom();
 
-    await for (final event in NoteChatService.instance.sendMessageStream(
-      note: widget.note,
-      message: message,
-    )) {
-      if (!mounted) return;
+      await for (final event in NoteChatService.instance.sendMessageStream(
+        note: widget.note,
+        message: message,
+      )) {
+        if (!mounted) return;
 
-      switch (event) {
-        case ChatReasoningDelta(:final delta):
-          setState(() => _streamReasoning += delta);
-          _scrollToBottom();
-        case ChatContentDelta(:final delta):
-          setState(() {
-            _hasContentDelta = true;
-            _streamContent += delta;
-          });
-          _scrollToBottom();
-        case ChatStreamDone(:final content, :final reasoning):
-          final assistant = await NoteChatService.instance.saveAssistantMessage(
-            noteId: widget.note.id,
-            content: content,
-            reasoning: reasoning,
-          );
-          if (!mounted) return;
-          setState(() {
-            _messages = [..._messages, assistant];
-            _streaming = false;
-            _streamReasoning = '';
-            _streamContent = '';
-            _hasContentDelta = false;
-          });
-          _scrollToBottom();
-        case ChatStreamError(:final message):
-          setState(() {
-            _streaming = false;
-            _streamReasoning = '';
-            _streamContent = '';
-            _hasContentDelta = false;
-            _error = message;
-          });
+        switch (event) {
+          case ChatReasoningDelta(:final delta):
+            setState(() => _streamReasoning += delta);
+            _scrollToBottom();
+          case ChatContentDelta(:final delta):
+            setState(() {
+              _hasContentDelta = true;
+              _streamContent += delta;
+            });
+            _scrollToBottom();
+          case ChatStreamDone(:final content, :final reasoning):
+            final assistant = await NoteChatService.instance
+                .saveAssistantMessage(
+                  noteId: widget.note.id,
+                  content: content,
+                  reasoning: reasoning,
+                );
+            if (!mounted) return;
+            setState(() {
+              _messages = [..._messages, assistant];
+              _streaming = false;
+              _streamReasoning = '';
+              _streamContent = '';
+              _hasContentDelta = false;
+            });
+            _scrollToBottom();
+          case ChatStreamError(:final message):
+            setState(() {
+              _streaming = false;
+              _streamReasoning = '';
+              _streamContent = '';
+              _hasContentDelta = false;
+              _error = message;
+            });
+        }
       }
-    }
 
-    if (mounted && _streaming) {
-      setState(() => _streaming = false);
+      if (mounted && _streaming) {
+        setState(() => _streaming = false);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _streaming = false;
+        _streamReasoning = '';
+        _streamContent = '';
+        _hasContentDelta = false;
+        _error = 'Errore di rete: $e';
+      });
     }
   }
 
@@ -150,9 +159,7 @@ class _NoteChatSheetState extends State<NoteChatSheet> {
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.85;
 
     return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.viewInsetsOf(context).bottom,
-      ),
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
       child: SizedBox(
         height: sheetHeight,
         child: Column(
@@ -222,9 +229,9 @@ class _NoteChatSheetState extends State<NoteChatSheet> {
       ),
       child: Text(
         _error!,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: DropColors.recordRed,
-            ),
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: DropColors.recordRed),
       ),
     );
   }
@@ -278,7 +285,9 @@ class _NoteChatSheetState extends State<NoteChatSheet> {
           (s) => Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: OutlinedButton(
-              onPressed: widget.note.isProcessing ? null : () => _sendMessage(s),
+              onPressed: widget.note.isProcessing
+                  ? null
+                  : () => _sendMessage(s),
               style: OutlinedButton.styleFrom(
                 side: BorderSide(color: DropColors.border(context)),
               ),
@@ -310,8 +319,9 @@ class _ChatBubble extends StatelessWidget {
         ),
         margin: const EdgeInsets.only(bottom: 12),
         child: Column(
-          crossAxisAlignment:
-              isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          crossAxisAlignment: isUser
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
           children: [
             if (!isUser &&
                 message.reasoning != null &&
@@ -323,8 +333,8 @@ class _ChatBubble extends StatelessWidget {
                 color: isUser
                     ? Theme.of(context).colorScheme.onSurface
                     : (isDark
-                        ? Colors.white.withValues(alpha: 0.06)
-                        : Colors.black.withValues(alpha: 0.05)),
+                          ? Colors.white.withValues(alpha: 0.06)
+                          : Colors.black.withValues(alpha: 0.05)),
                 borderRadius: BorderRadius.circular(14),
                 border: isUser
                     ? null
@@ -335,10 +345,9 @@ class _ChatBubble extends StatelessWidget {
                 fontSize: 13,
                 textColor: isUser
                     ? Theme.of(context).colorScheme.surface
-                    : Theme.of(context)
-                        .colorScheme
-                        .onSurface
-                        .withValues(alpha: 0.9),
+                    : Theme.of(
+                        context,
+                      ).colorScheme.onSurface.withValues(alpha: 0.9),
               ),
             ),
           ],
@@ -375,7 +384,9 @@ class _StreamingBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (reasoning.isNotEmpty || isStreamingReasoning)
+            if (reasoning.isEmpty && content.isEmpty)
+              const ReasoningWait()
+            else if (reasoning.isNotEmpty || isStreamingReasoning)
               ReasoningAccordion(
                 reasoning: reasoning,
                 isStreamingReasoning: isStreamingReasoning,
@@ -383,8 +394,10 @@ class _StreamingBubble extends StatelessWidget {
               ),
             if (content.isNotEmpty)
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: isDark
                       ? Colors.white.withValues(alpha: 0.06)
@@ -396,15 +409,6 @@ class _StreamingBubble extends StatelessWidget {
                   data: content,
                   fontSize: 13,
                   renderVisuals: false,
-                ),
-              )
-            else if (!isStreamingReasoning && reasoning.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(8),
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
                 ),
               ),
           ],
@@ -427,10 +431,8 @@ void showNoteChatSheet(
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
-    builder: (context) => NoteChatSheet(
-      note: note,
-      initialMessage: initialMessage,
-    ),
+    builder: (context) =>
+        NoteChatSheet(note: note, initialMessage: initialMessage),
   ).whenComplete(() {
     FocusManager.instance.primaryFocus?.unfocus();
   });

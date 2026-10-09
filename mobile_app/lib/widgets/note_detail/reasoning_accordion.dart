@@ -2,6 +2,91 @@ import 'package:flutter/material.dart';
 
 import '../../theme/drop_theme.dart';
 
+/// Quiet stand-in for live reasoning tokens. Shown until the full reply lands.
+class ReasoningWait extends StatefulWidget {
+  const ReasoningWait({super.key});
+
+  @override
+  State<ReasoningWait> createState() => _ReasoningWaitState();
+}
+
+class _ReasoningWaitState extends State<ReasoningWait>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = DropColors.muted(context);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 14,
+                height: 18,
+                child: Stack(
+                  alignment: Alignment.topCenter,
+                  children: [
+                    Align(
+                      alignment: Alignment.topCenter,
+                      child: Container(
+                        width: 1,
+                        height: 18,
+                        color: muted.withValues(alpha: 0.28),
+                      ),
+                    ),
+                    Positioned(
+                      top: 1 + 8 * _controller.value,
+                      child: Container(
+                        width: 3,
+                        height: 7,
+                        decoration: BoxDecoration(
+                          color: muted,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'ragionamento',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  fontSize: 10,
+                  letterSpacing: 0.3,
+                  color: muted,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
 class ReasoningAccordion extends StatefulWidget {
   const ReasoningAccordion({
     super.key,
@@ -75,11 +160,11 @@ class _ReasoningAccordionState extends State<ReasoningAccordion> {
                 Text(
                   'ragionamento',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        fontSize: 10,
-                        letterSpacing: 0.3,
-                        color: muted,
-                        fontWeight: FontWeight.w400,
-                      ),
+                    fontSize: 10,
+                    letterSpacing: 0.3,
+                    color: muted,
+                    fontWeight: FontWeight.w400,
+                  ),
                 ),
               ],
             ),
@@ -112,9 +197,7 @@ class _ReasoningAccordionState extends State<ReasoningAccordion> {
                                       widget.isStreamingReasoning
                                   ? '...'
                                   : widget.reasoning,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
+                              style: Theme.of(context).textTheme.bodySmall
                                   ?.copyWith(
                                     fontSize: 11,
                                     height: 1.45,

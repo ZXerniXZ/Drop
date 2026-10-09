@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 
@@ -11,6 +12,7 @@ import '../models/app_language.dart';
 import '../models/audio_note.dart';
 import '../models/chat_stream_event.dart';
 import '../models/note_chat_message.dart';
+import 'http_text.dart';
 import 'openrouter_json_parser.dart';
 import 'openrouter_prompts.dart';
 
@@ -96,18 +98,21 @@ class OpenRouterClient {
     if (aiModel == null || aiModel.trim().isEmpty) return defaultLlmModel;
     final stripped = aiModel.trim();
     if (stripped.contains('/')) return stripped;
-    final normalized = stripped.toLowerCase().replaceAll('-', '_').replaceAll(' ', '_');
+    final normalized = stripped
+        .toLowerCase()
+        .replaceAll('-', '_')
+        .replaceAll(' ', '_');
     return _modelAliases[normalized] ??
         _modelAliases[stripped.toLowerCase()] ??
         defaultLlmModel;
   }
 
   Map<String, String> _headers(String apiKey) => {
-        'Authorization': 'Bearer $apiKey',
-        'Content-Type': 'application/json',
-        'HTTP-Referer': openRouterAppReferer,
-        'X-Title': openRouterAppTitle,
-      };
+    'Authorization': 'Bearer $apiKey',
+    'Content-Type': 'application/json',
+    'HTTP-Referer': openRouterAppReferer,
+    'X-Title': openRouterAppTitle,
+  };
 
   String _audioFormat(String filePath) {
     final name = AudioBinaryStore.instance.filenameOf(filePath);
@@ -133,10 +138,7 @@ class OpenRouterClient {
 
     final payload = <String, dynamic>{
       'model': whisperModel,
-      'input_audio': {
-        'data': audioB64,
-        'format': _audioFormat(filePath),
-      },
+      'input_audio': {'data': audioB64, 'format': _audioFormat(filePath)},
     };
 
     final langCode = _languageCode(language);
@@ -266,10 +268,7 @@ class OpenRouterClient {
 
   Future<bool> testConnection(String apiKey) async {
     final response = await http
-        .get(
-          Uri.parse(openRouterModelsUrl),
-          headers: _headers(apiKey),
-        )
+        .get(Uri.parse(openRouterModelsUrl), headers: _headers(apiKey))
         .timeout(const Duration(seconds: 15));
     return response.statusCode == 200;
   }
@@ -434,10 +433,15 @@ class OpenRouterClient {
 
     final payload = {
       'model': resolveLlmModel(aiModel),
-      'stream': true,
+      'stream': !kIsWeb,
       'reasoning': {'effort': 'medium'},
       'messages': messages,
     };
+
+    if (kIsWeb) {
+      yield* _completeNoteChat(apiKey: apiKey, payload: payload);
+      return;
+    }
 
     final client = http.Client();
     try {
@@ -521,6 +525,70 @@ class OpenRouterClient {
     }
   }
 
+  /// One-shot reply. The browser waits for the full body, then the chat
+  /// prints it once.
+  Stream<ChatStreamEvent> _completeNoteChat({
+    required String apiKey,
+    required Object payload,
+  }) async* {
+    try {
+      final response = await postText(
+        url: Uri.parse(openRouterChatUrl),
+        headers: _headers(apiKey),
+        body: jsonEncode(payload),
+        timeout: llmTimeout,
+      );
+      if (response.statusCode != 200) {
+        yield ChatStreamError(
+          'OpenRouter error ${response.statusCode}: ${response.body}',
+        );
+        return;
+      }
+
+      final parsed = jsonDecode(response.body);
+      if (parsed is! Map) {
+        yield const ChatStreamError('Nessuna risposta.');
+        return;
+      }
+      final root = Map<String, dynamic>.from(parsed);
+      if (root['error'] != null) {
+        final err = root['error'];
+        final errMsg = err is Map
+            ? err['message']?.toString() ?? err.toString()
+            : err.toString();
+        yield ChatStreamError(errMsg);
+        return;
+      }
+
+      final choices = root['choices'];
+      if (choices is! List || choices.isEmpty || choices.first is! Map) {
+        yield const ChatStreamError('Nessuna risposta.');
+        return;
+      }
+      final message = Map<String, dynamic>.from(
+        choices.first as Map,
+      )['message'];
+      if (message is! Map) {
+        yield const ChatStreamError('Nessuna risposta.');
+        return;
+      }
+      final delta = Map<String, dynamic>.from(message);
+      final reasoning = _extractReasoningDelta(delta);
+      final content = delta['content'];
+      final text = content is String ? content : '';
+      if (text.trim().isEmpty && reasoning.trim().isEmpty) {
+        yield const ChatStreamError('Nessuna risposta.');
+        return;
+      }
+      yield ChatStreamDone(
+        content: text,
+        reasoning: reasoning.trim().isEmpty ? null : reasoning,
+      );
+    } catch (e) {
+      yield ChatStreamError('Errore di rete: $e');
+    }
+  }
+
   Map<String, dynamic> _noteContextFromAudioNote(AudioNote note) {
     final sd = note.structuredData;
     return {
@@ -531,10 +599,7 @@ class OpenRouterClient {
       'formatted_transcription': note.transcription,
       'summary': note.summary,
       'highlights': sd.highlights,
-      'key_data': {
-        ...sd.keyDataPayload(),
-        'tags': note.tag,
-      },
+      'key_data': {...sd.keyDataPayload(), 'tags': note.tag},
       'mind_map': sd.mindMap.map((node) => node.toMap()).toList(),
       'speaker_view': sd.speakerView
           .map(
