@@ -110,7 +110,8 @@ class NoteChatService {
   static final _random = Random();
 
   String _newId() =>
-      '${DateTime.now().microsecondsSinceEpoch}_${_random.nextInt(1 << 32)}';
+      // On the web, `1 << 32` is 0, and nextInt(0) throws.
+      '${DateTime.now().microsecondsSinceEpoch}_${_random.nextInt(1 << 30)}';
 
   Map<String, dynamic> _noteContextFromAudioNote(AudioNote note) {
     final sd = note.structuredData;
