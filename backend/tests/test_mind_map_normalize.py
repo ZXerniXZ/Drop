@@ -90,6 +90,24 @@ class MindMapNormalizeTest(unittest.TestCase):
         )
         self.assertEqual(nodes[0]["visuals"][0]["expressions"], ["2*x^2 - 1"])
 
+    def test_accepts_single_root_object_and_name_key(self):
+        nodes = _normalize_mind_map(
+            {
+                "name": "Lezione",
+                "children": {
+                    "title": "Dettaglio",
+                    "children": [{"label": "Esempio"}],
+                },
+            }
+        )
+        self.assertEqual(nodes[0]["title"], "Lezione")
+        self.assertEqual(nodes[0]["children"][0]["title"], "Dettaglio")
+        self.assertEqual(nodes[0]["children"][0]["children"][0]["title"], "Esempio")
+
+    def test_accepts_json_string_of_nodes(self):
+        nodes = _normalize_mind_map('{"nodes":[{"topic":"Radice"}]}')
+        self.assertEqual(nodes[0]["title"], "Radice")
+
     def test_limits_depth_and_visual_count(self):
         deep = {"title": "L4", "children": [{"title": "L5"}]}
         node = {"title": "L1", "children": [{"title": "L2", "children": [{"title": "L3", "children": [deep]}]}]}

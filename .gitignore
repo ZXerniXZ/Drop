@@ -1,5 +1,7 @@
 # IDE / editor
-.cursor/
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
 .idea/
 .vscode/
 *.swp
@@ -32,3 +34,9 @@ backend/storage/
 # OS
 .DS_Store
 Thumbs.db
+
+# Android signing and Play Console credentials
+*.jks
+*.keystore
+play-service-account.json
+serviceAccountJson.json

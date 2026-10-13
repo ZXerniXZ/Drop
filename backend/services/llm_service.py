@@ -524,11 +524,48 @@ def _normalize_visuals(value: Any) -> list[dict[str, Any]]:
     return visuals
 
 
+def _mind_node_title(item: dict[str, Any]) -> str:
+    for key in ("title", "name", "label", "topic"):
+        raw = item.get(key)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    return ""
+
+
+def _as_node_list(value: Any) -> Any:
+    """Accetta la lista attesa, oppure un solo nodo radice.
+
+    Alcuni modelli rispondono con {"title", "children"} invece di una lista,
+    o con il JSON annidato in una stringa. Senza questo la mappa viene salvata
+    vuota e la schermata resta bianca.
+    """
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                value = json.loads(text)
+            except json.JSONDecodeError:
+                return value
+    if not isinstance(value, dict):
+        return value
+    title = _mind_node_title(value)
+    body = value.get("body") or value.get("explanation") or value.get("detail")
+    children = value.get("children")
+    if title or (isinstance(body, str) and body.strip()) or isinstance(children, (list, dict)):
+        return [value]
+    nested = value.get("mind_map")
+    if not isinstance(nested, list):
+        nested = value.get("nodes")
+    return nested if isinstance(nested, list) else value
+
+
 def _normalize_mind_map(value: Any) -> list[dict[str, Any]]:
     count = 0
 
     def walk(raw: Any, depth: int) -> list[dict[str, Any]]:
         nonlocal count
+        if isinstance(raw, dict):
+            raw = [raw]
         if not isinstance(raw, list) or depth > _MAX_MIND_DEPTH:
             return []
         nodes: list[dict[str, Any]] = []
@@ -537,7 +574,7 @@ def _normalize_mind_map(value: Any) -> list[dict[str, Any]]:
                 break
             if not isinstance(item, dict):
                 continue
-            title = str(item.get("title") or "").strip()
+            title = _mind_node_title(item)
             body = str(
                 item.get("body") or item.get("explanation") or item.get("detail") or ""
             ).strip()
@@ -546,10 +583,11 @@ def _normalize_mind_map(value: Any) -> list[dict[str, Any]]:
             if not title:
                 title = body.split("\n", 1)[0][:60]
             count += 1
+            child_raw = item.get("children")
+            if child_raw is None:
+                child_raw = item.get("nodes")
             children = (
-                walk(item.get("children") or item.get("nodes"), depth + 1)
-                if depth < _MAX_MIND_DEPTH
-                else []
+                walk(child_raw, depth + 1) if depth < _MAX_MIND_DEPTH else []
             )
             nodes.append(
                 {
@@ -561,9 +599,7 @@ def _normalize_mind_map(value: Any) -> list[dict[str, Any]]:
             )
         return nodes
 
-    if isinstance(value, dict):
-        value = value.get("mind_map") or value.get("nodes")
-    return walk(value, 1)
+    return walk(_as_node_list(value), 1)
 
 
 def _with_custom_prompt(prompt: str, custom_prompt: str | None) -> str:
@@ -758,7 +794,12 @@ async def process_optional_analysis(
             api_key=api_key,
             max_tokens=12000,
         )
-        return {"mind_map": _normalize_mind_map(data.get("mind_map"))}
+        raw_map = data.get("mind_map")
+        if raw_map is None:
+            raw_map = data.get("nodes")
+        if raw_map is None:
+            raw_map = data.get("tree") if isinstance(data.get("tree"), (list, dict)) else data
+        return {"mind_map": _normalize_mind_map(raw_map)}
 
     data = await _complete_json(
         system=_build_key_data_system_prompt(

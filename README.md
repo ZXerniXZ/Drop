@@ -222,6 +222,51 @@ Tutte le release: https://github.com/ZXerniXZ/Drop/releases
 
 ---
 
+## Release
+
+L'app Android (`xyz.drop.app`) è Flutter. Il workflow `.github/workflows/play-alpha.yml` installa il Flutter SDK e compila con `./gradlew bundleRelease`, poi carica l'AAB sulla traccia **alpha** (test chiuso). Non pubblica mai su production.
+
+### Secret GitHub
+
+In **Settings → Secrets and variables → Actions**:
+
+| Secret | Contenuto |
+|--------|-----------|
+| `PLAY_SERVICE_ACCOUNT_JSON` | JSON del service account Play (testo, non base64). File locale in `~/Desktop/Drop-play/`. |
+| `KEYSTORE_BASE64` | Keystore di upload in base64. |
+| `KEYSTORE_PASSWORD` | Password del keystore. |
+| `KEY_ALIAS` | Alias della chiave. |
+| `KEY_PASSWORD` | Password della chiave. |
+| `SUPABASE_URL` | Già usato dall'APK. Senza questo la build di Play non fa login. |
+| `SUPABASE_ANON_KEY` | Già usato dall'APK. |
+
+Sul Mac, per il keystore:
+
+```bash
+base64 -i upload.jks | pbcopy
+```
+
+Incolla il risultato nel secret `KEYSTORE_BASE64`. Non committare `*.jks`, `*.keystore` o `play-service-account.json`.
+
+L'offset del `versionCode` è `38 + github.run_number`. Per cambiarlo, variable di repository `PLAY_VERSION_CODE_BASE` (default `38`). Il risultato deve restare **> 38**. Un re-run della stessa esecuzione riusa lo stesso `versionCode`: se Play lo ha già accettato, avvia un run nuovo.
+
+### Pubblicare un test chiuso
+
+```bash
+git tag v1.0.6
+git push origin v1.0.6
+```
+
+`v1.0.6` diventa `versionName` `1.0.6`. Il tag deve essere solo `vX.Y.Z` e strettamente maggiore dell'ultimo nome già usato (oggi `1.0.5`, anche dai tag APK `v1.0.5-buildN`). I tag `vX.Y.Z-buildN` li crea il workflow APK e non pubblicano su Play. In alternativa: Actions → **Play closed testing (alpha)** → Run workflow, con input `version_name` nello stesso formato.
+
+Le note di rilascio stanno in `distribution/whatsnew/` (`whatsnew-it-IT`, `whatsnew-en-US`).
+
+### Production
+
+Questo workflow non ha una traccia production. La promozione da test chiuso a production si fa solo a mano dalla Play Console.
+
+---
+
 ## PWA per iPhone (Safari)
 
 La stessa app Flutter è pubblicata come sito installabile su **https://app.drop-prj.xyz**.

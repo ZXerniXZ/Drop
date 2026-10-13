@@ -70,14 +70,20 @@ class MindMapNode {
 
   factory MindMapNode.fromMap(Map<String, dynamic> map) {
     final rawChildren = map['children'] ?? map['nodes'];
-    final children = rawChildren is List
-        ? rawChildren
-            .whereType<Map>()
-            .map((item) => MindMapNode.fromMap(Map<String, dynamic>.from(item)))
-            .where((node) => node.title.isNotEmpty || node.body.isNotEmpty)
-            .toList()
-        : const <MindMapNode>[];
-    final title = map['title']?.toString().trim() ?? '';
+    final childList = rawChildren is Map
+        ? [rawChildren]
+        : rawChildren is List
+            ? rawChildren
+            : const [];
+    final children = childList
+        .whereType<Map>()
+        .map((item) => MindMapNode.fromMap(Map<String, dynamic>.from(item)))
+        .where((node) => node.title.isNotEmpty || node.body.isNotEmpty)
+        .toList();
+    final title = (map['title'] ?? map['name'] ?? map['label'] ?? map['topic'])
+            ?.toString()
+            .trim() ??
+        '';
     final body = (map['body'] ?? map['explanation'] ?? map['detail'])
             ?.toString()
             .trim() ??
@@ -247,13 +253,16 @@ class NoteStructuredData {
         : <String>[];
 
     final mindRaw = data['mind_map'];
-    final mindMap = mindRaw is List
-        ? mindRaw
-            .whereType<Map>()
-            .map((item) => MindMapNode.fromMap(Map<String, dynamic>.from(item)))
-            .where((node) => node.title.isNotEmpty || node.body.isNotEmpty)
-            .toList()
-        : <MindMapNode>[];
+    final mindList = mindRaw is Map
+        ? [mindRaw]
+        : mindRaw is List
+            ? mindRaw
+            : const [];
+    final mindMap = mindList
+        .whereType<Map>()
+        .map((item) => MindMapNode.fromMap(Map<String, dynamic>.from(item)))
+        .where((node) => node.title.isNotEmpty || node.body.isNotEmpty)
+        .toList();
 
     return NoteStructuredData(
       highlights: highlights,

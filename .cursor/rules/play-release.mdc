@@ -1,0 +1,27 @@
+---
+description: Quando l'utente chiede di pushare, crea e pusha il tag Play vX.Y.Z successivo
+alwaysApply: true
+---
+
+# Push con tag Play
+
+Quando l'utente chiede di pushare, il push include il tag Play successivo. Non aspettare una richiesta di release separata. Se dice di non taggare o di non pubblicare, pusha solo il branch.
+
+## Prima del push
+
+1. `git fetch origin --tags` e `git tag -l 'v*'`.
+2. Prendi l'ultimo `X.Y.Z` usato, anche dal prefisso dei tag APK `vX.Y.Z-buildN`.
+3. Il tag nuovo è `vX.Y.Z` strettamente maggiore. Di solito è la patch +1: ultimo `1.0.5` → `v1.0.6`.
+4. In `mobile_app/pubspec.yaml` imposta `version: X.Y.Z+N`. `N` è intero, > 38, e maggiore dell'ultimo `+N` e dell'ultimo `-buildN`.
+5. Se pubspec è cambiato, committalo prima del tag. Il tag punta a quel commit.
+6. Non creare tag `vX.Y.Z-buildN`: li crea `client-build.yml`. Non riusare, spostare, cancellare o fare force-push di un tag.
+
+## Push
+
+```bash
+git tag v1.0.6
+git push origin HEAD
+git push origin v1.0.6
+```
+
+`v1.0.6` è solo l'esempio: usa il tag calcolato al punto 3. Il tag fa partire `.github/workflows/play-alpha.yml` sulla traccia alpha. Mai production. Il `versionCode` lo calcola la CI, non va nel nome del tag.

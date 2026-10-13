@@ -1,0 +1,235 @@
+# Pubblica l'AAB sulla traccia alpha (test chiuso) di Google Play.
+# Non promuovere mai production da qui: si fa solo a mano dalla Play Console.
+
+name: Play closed testing (alpha)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: "versionName se non parti da un tag v* (es. 1.0.6)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: play-alpha
+  cancel-in-progress: false
+
+env:
+  # Ultimo versionCode pubblicato: 38. Le build partono da BASE + github.run_number.
+  # Sovrascrivibile con la variable di repository PLAY_VERSION_CODE_BASE.
+  PLAY_VERSION_CODE_BASE: ${{ vars.PLAY_VERSION_CODE_BASE || '38' }}
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.resolve.outputs.skip }}
+      version_name: ${{ steps.resolve.outputs.version_name }}
+      version_code: ${{ steps.resolve.outputs.version_code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Resolve version
+        id: resolve
+        env:
+          VERSION_NAME_INPUT: ${{ inputs.version_name }}
+        run: |
+          set -euo pipefail
+          git fetch origin --tags --force
+
+          tag="${GITHUB_REF#refs/tags/}"
+          if [[ "${GITHUB_REF}" == refs/tags/* && "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-build[0-9]+$ ]]; then
+            echo "Tag APK $tag: lo crea client-build.yml, non va su Play."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          base="${PLAY_VERSION_CODE_BASE:-38}"
+          if ! [[ "$base" =~ ^[0-9]+$ ]]; then
+            echo "PLAY_VERSION_CODE_BASE non è un intero: $base"
+            exit 1
+          fi
+          code=$((base + GITHUB_RUN_NUMBER))
+          if (( code <= 38 )); then
+            echo "versionCode $code deve essere > 38"
+            exit 1
+          fi
+
+          name=""
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            name="${tag#v}"
+          elif [[ -n "${VERSION_NAME_INPUT}" ]]; then
+            name="${VERSION_NAME_INPUT#v}"
+          fi
+          if [[ -z "$name" ]]; then
+            echo "Serve un tag vX.Y.Z (es. v1.0.6) oppure l'input version_name."
+            exit 1
+          fi
+          if ! [[ "$name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "versionName deve essere X.Y.Z, senza suffisso. Ricevuto: $name"
+            exit 1
+          fi
+
+          latest=""
+          while IFS= read -r existing; do
+            [[ "$existing" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)(-build[0-9]+)?$ ]] || continue
+            ver="${BASH_REMATCH[1]}"
+            [[ "$existing" == "v$name" ]] && continue
+            if [[ -z "$latest" ]] || [[ "$(printf '%s\n%s\n' "$latest" "$ver" | sort -V | tail -n 1)" == "$ver" && "$ver" != "$latest" ]]; then
+              latest="$ver"
+            fi
+          done < <(git tag -l 'v*')
+
+          if [[ -n "$latest" ]]; then
+            top="$(printf '%s\n%s\n' "$latest" "$name" | sort -V | tail -n 1)"
+            if [[ "$top" != "$name" || "$name" == "$latest" ]]; then
+              echo "v$name non è successivo a v$latest. Il prossimo tag Play deve essere un X.Y.Z maggiore."
+              exit 1
+            fi
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "version_name=$name" >> "$GITHUB_OUTPUT"
+          echo "version_code=$code" >> "$GITHUB_OUTPUT"
+          echo "versionName=$name versionCode=$code precedente=v${latest:-nessuno} track=alpha"
+
+  alpha:
+    needs: version
+    if: needs.version.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      VERSION_NAME: ${{ needs.version.outputs.version_name }}
+      VERSION_CODE: ${{ needs.version.outputs.version_code }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check release secrets
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in PLAY_SERVICE_ACCOUNT_JSON KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD SUPABASE_URL SUPABASE_ANON_KEY; do
+            if [[ -z "${!name}" ]]; then
+              echo "Manca il secret $name"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: |
+            mobile_app/android/**/*.gradle*
+            mobile_app/android/**/*.kts
+            mobile_app/android/gradle/wrapper/gradle-wrapper.properties
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Prepare Flutter project
+        working-directory: mobile_app
+        run: |
+          set -euo pipefail
+          flutter pub get
+          # Il template Flutter non versiona gradlew: questo comando lo rigenera
+          # e scrive android/local.properties. La build vera è ./gradlew bundleRelease.
+          flutter build apk --config-only --release
+          test -x android/gradlew
+
+      - name: Decode upload keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          keystore="$RUNNER_TEMP/upload.jks"
+          printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > "$keystore"
+          chmod 600 "$keystore"
+          if [[ ! -s "$keystore" ]]; then
+            echo "Il keystore decodificato è vuoto"
+            exit 1
+          fi
+          echo "KEYSTORE_PATH=$keystore" >> "$GITHUB_ENV"
+
+      - name: Bundle release
+        working-directory: mobile_app/android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.gradle"
+          printf '%s\n' \
+            'org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -XX:ReservedCodeCacheSize=256m -XX:+HeapDumpOnOutOfMemoryError' \
+            'org.gradle.parallel=true' \
+            'org.gradle.caching=true' \
+            > "$HOME/.gradle/gradle.properties"
+          dart_defines="$(
+            printf '%s' "SUPABASE_URL=${SUPABASE_URL}" | base64 -w 0
+          ),$(
+            printf '%s' "SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}" | base64 -w 0
+          )"
+          ./gradlew bundleRelease --stacktrace -Pdart-defines="$dart_defines"
+
+      - name: Locate release outputs
+        id: bundle
+        run: |
+          set -euo pipefail
+          aab="$(find mobile_app/build -type f -name 'app-release.aab' -print -quit)"
+          if [[ -z "$aab" ]]; then
+            echo "AAB release non trovato"
+            exit 1
+          fi
+          echo "aab=$aab" >> "$GITHUB_OUTPUT"
+          echo "AAB: $aab"
+          mapping="$(find mobile_app/build -type f -path '*/mapping/release/mapping.txt' -print -quit || true)"
+          if [[ -n "$mapping" ]]; then
+            echo "mapping=$mapping" >> "$GITHUB_OUTPUT"
+            echo "mapping R8: $mapping"
+          else
+            echo "mapping=" >> "$GITHUB_OUTPUT"
+            echo "Nessun mapping R8/ProGuard: minify non è attivo."
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: drop-alpha-${{ env.VERSION_NAME }}-${{ env.VERSION_CODE }}
+          path: ${{ steps.bundle.outputs.aab }}
+          if-no-files-found: error
+
+      - name: Upload to Play closed testing
+        uses: r0adkll/upload-google-play@v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: xyz.drop.app
+          releaseFiles: ${{ steps.bundle.outputs.aab }}
+          track: alpha
+          status: completed
+          whatsNewDirectory: distribution/whatsnew
+          mappingFile: ${{ steps.bundle.outputs.mapping }}

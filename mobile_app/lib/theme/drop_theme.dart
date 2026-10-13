@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class DropColors {
   DropColors._();
@@ -29,6 +30,30 @@ class DropColors {
 class DropTheme {
   DropTheme._();
 
+  static const overlayStyleLight = SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    systemNavigationBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.dark,
+    statusBarBrightness: Brightness.light,
+    systemNavigationBarIconBrightness: Brightness.dark,
+    systemStatusBarContrastEnforced: false,
+    systemNavigationBarContrastEnforced: false,
+  );
+
+  static const overlayStyleDark = SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    systemNavigationBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.light,
+    statusBarBrightness: Brightness.dark,
+    systemNavigationBarIconBrightness: Brightness.light,
+    systemStatusBarContrastEnforced: false,
+    systemNavigationBarContrastEnforced: false,
+  );
+
+  static SystemUiOverlayStyle overlayStyle(Brightness brightness) {
+    return brightness == Brightness.dark ? overlayStyleDark : overlayStyleLight;
+  }
+
   static ThemeData light() {
     const scheme = ColorScheme.light(
       surface: DropColors.lightSurface,
@@ -43,11 +68,12 @@ class DropTheme {
       colorScheme: scheme,
       scaffoldBackgroundColor: DropColors.lightBackground,
       dividerColor: Colors.black.withValues(alpha: 0.06),
-      appBarTheme: const AppBarTheme(
+      appBarTheme: AppBarTheme(
         backgroundColor: DropColors.lightSurface,
         foregroundColor: Colors.black,
         elevation: 0,
         scrolledUnderElevation: 0,
+        systemOverlayStyle: overlayStyleLight,
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
@@ -76,6 +102,7 @@ class DropTheme {
         foregroundColor: Color(0xFFF4F4F5),
         elevation: 0,
         scrolledUnderElevation: 0,
+        systemOverlayStyle: overlayStyleDark,
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
@@ -104,11 +131,7 @@ class DropTheme {
         letterSpacing: -0.2,
         color: base,
       ),
-      bodyMedium: TextStyle(
-        fontSize: 14,
-        height: 1.55,
-        color: muted,
-      ),
+      bodyMedium: TextStyle(fontSize: 14, height: 1.55, color: muted),
       labelSmall: TextStyle(
         fontSize: 10,
         fontWeight: FontWeight.w500,

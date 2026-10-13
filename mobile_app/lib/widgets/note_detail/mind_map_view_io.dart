@@ -40,11 +40,26 @@ class _MindMapViewState extends State<MindMapView> {
     if (_underTest) return;
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(Colors.transparent)
+      // Uno sfondo trasparente su Android lascia il WebView vuoto: la pagina
+      // della mappa si apre ma l'albero non viene disegnato.
+      ..setBackgroundColor(const Color(0xFF000000))
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (_) {
+            _ready = true;
+            _render();
+          },
+        ),
+      )
       ..addJavaScriptChannel(
         'DropBridge',
         onMessageReceived: (message) {
-          final decoded = jsonDecode(message.message);
+          Object? decoded;
+          try {
+            decoded = jsonDecode(message.message);
+          } catch (_) {
+            return;
+          }
           if (decoded is Map && decoded['type'] == 'ready') {
             _ready = true;
             _render();
@@ -60,6 +75,11 @@ class _MindMapViewState extends State<MindMapView> {
     final brightness = Theme.of(context).brightness;
     final changed = _brightness != null && _brightness != brightness;
     _brightness = brightness;
+    _controller?.setBackgroundColor(
+      brightness == Brightness.dark
+          ? const Color(0xFF000000)
+          : const Color(0xFFFAFAFA),
+    );
     if (changed) _render();
   }
 
@@ -98,6 +118,7 @@ class _MindMapViewState extends State<MindMapView> {
     });
     final script = 'DropMap.render($payload, $dark)';
     await controller.runJavaScript(script);
+    await controller.runJavaScript('DropMap.fit()');
   }
 
   @override

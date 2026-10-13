@@ -61,90 +61,92 @@ class _UpdateRequiredScreenState extends State<UpdateRequiredScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFF09090B),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 360),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Drop',
-                  style: TextStyle(
-                    color: Color(0xFFF4F4F5),
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: -0.3,
-                  ),
-                ),
-                const SizedBox(height: 28),
-                const Text(
-                  'Aggiornamento necessario',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Color(0xFFF4F4F5),
-                    fontSize: 22,
-                    fontWeight: FontWeight.w500,
-                    letterSpacing: -0.4,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  widget.policy.message,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.62),
-                    fontSize: 14,
-                    height: 1.45,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Versione ${AppIdentity.version} (${AppIdentity.build})',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.38),
-                    fontSize: 12,
-                  ),
-                ),
-                const SizedBox(height: 28),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: FilledButton(
-                    onPressed: _update,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFFF4F4F5),
-                      foregroundColor: const Color(0xFF09090B),
-                    ),
-                    child: Text(buttonLabel),
-                  ),
-                ),
-                if (Navigator.of(context).canPop()) ...[
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: Text(
-                      'Chiudi',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.62),
-                      ),
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 360),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Drop',
+                    style: TextStyle(
+                      color: Color(0xFFF4F4F5),
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -0.3,
                     ),
                   ),
-                ],
-                if (_error != null) ...[
+                  const SizedBox(height: 28),
+                  const Text(
+                    'Aggiornamento necessario',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Color(0xFFF4F4F5),
+                      fontSize: 22,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: -0.4,
+                    ),
+                  ),
                   const SizedBox(height: 12),
                   Text(
-                    _error!,
+                    widget.policy.message,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Color(0xFFFF4D4F),
-                      fontSize: 13,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.62),
+                      fontSize: 14,
+                      height: 1.45,
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Versione ${AppIdentity.version} (${AppIdentity.build})',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.38),
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: FilledButton(
+                      onPressed: _update,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFF4F4F5),
+                        foregroundColor: const Color(0xFF09090B),
+                      ),
+                      child: Text(buttonLabel),
+                    ),
+                  ),
+                  if (Navigator.of(context).canPop()) ...[
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: Text(
+                        'Chiudi',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.62),
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (_error != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      _error!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Color(0xFFFF4D4F),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         ),

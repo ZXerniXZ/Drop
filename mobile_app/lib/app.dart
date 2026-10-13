@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'screens/accept_terms_screen.dart';
@@ -30,8 +31,9 @@ class _DropAppState extends State<DropApp> {
 
   void _toggleTheme() {
     setState(() {
-      _themeMode =
-          _themeMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+      _themeMode = _themeMode == ThemeMode.dark
+          ? ThemeMode.light
+          : ThemeMode.dark;
     });
   }
 
@@ -47,12 +49,15 @@ class _DropAppState extends State<DropApp> {
       theme: DropTheme.light(),
       darkTheme: DropTheme.dark(),
       builder: (context, child) {
-        return Column(
-          children: [
-            const WebGetAppBanner(),
-            const IosInstallBanner(),
-            Expanded(child: child ?? const SizedBox.shrink()),
-          ],
+        return AnnotatedRegion<SystemUiOverlayStyle>(
+          value: DropTheme.overlayStyle(Theme.of(context).brightness),
+          child: Column(
+            children: [
+              const WebGetAppBanner(),
+              const IosInstallBanner(),
+              Expanded(child: child ?? const SizedBox.shrink()),
+            ],
+          ),
         );
       },
       home: StreamBuilder<AuthState>(

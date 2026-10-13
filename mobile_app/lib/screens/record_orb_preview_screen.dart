@@ -55,9 +55,9 @@ class _RecordOrbPreviewScreenState extends State<RecordOrbPreviewScreen>
     await AppPreferencesService.instance.saveRecordOrbStyle(style);
     if (!mounted) return;
     setState(() => _selected = style);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Stile attivo: ${style.label}')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Stile attivo: ${style.label}')));
   }
 
   @override
@@ -80,49 +80,52 @@ class _RecordOrbPreviewScreenState extends State<RecordOrbPreviewScreen>
             ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
-        children: [
-          Text(
-            'Confronta gli stili e scegli quello che preferisci. La scelta resta salvata su questo dispositivo.',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontSize: 13,
-                  color: DropColors.muted(context),
-                ),
-          ),
-          const SizedBox(height: 16),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Simula registrazione'),
-            subtitle: const Text('Anima l\'ampiezza audio senza microfono'),
-            value: _simulateRecording,
-            onChanged: (v) => setState(() => _simulateRecording = v),
-          ),
-          const SizedBox(height: 8),
-          ...RecordOrbStyle.values.map((style) {
-            final isActive = style == _selected;
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: _StylePreviewCard(
-                style: style,
-                isSelected: isActive,
-                isDark: isDark,
-                simulateRecording: _simulateRecording,
-                breathController: _breathController,
-                waveController: _waveController,
-                onSelect: () => _applyStyle(style),
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
+          children: [
+            Text(
+              'Confronta gli stili e scegli quello che preferisci. La scelta resta salvata su questo dispositivo.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                fontSize: 13,
+                color: DropColors.muted(context),
               ),
-            );
-          }),
-          const SizedBox(height: 8),
-          _FullscreenMockCard(
-            style: _selected,
-            isDark: isDark,
-            simulateRecording: _simulateRecording,
-            breathController: _breathController,
-            waveController: _waveController,
-          ),
-        ],
+            ),
+            const SizedBox(height: 16),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Simula registrazione'),
+              subtitle: const Text('Anima l\'ampiezza audio senza microfono'),
+              value: _simulateRecording,
+              onChanged: (v) => setState(() => _simulateRecording = v),
+            ),
+            const SizedBox(height: 8),
+            ...RecordOrbStyle.values.map((style) {
+              final isActive = style == _selected;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: _StylePreviewCard(
+                  style: style,
+                  isSelected: isActive,
+                  isDark: isDark,
+                  simulateRecording: _simulateRecording,
+                  breathController: _breathController,
+                  waveController: _waveController,
+                  onSelect: () => _applyStyle(style),
+                ),
+              );
+            }),
+            const SizedBox(height: 8),
+            _FullscreenMockCard(
+              style: _selected,
+              isDark: isDark,
+              simulateRecording: _simulateRecording,
+              breathController: _breathController,
+              waveController: _waveController,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -184,27 +187,27 @@ class _StylePreviewCard extends StatelessWidget {
                     Text(
                       style.label,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       style.description,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: DropColors.muted(context),
-                            fontSize: 12,
-                          ),
+                        color: DropColors.muted(context),
+                        fontSize: 12,
+                      ),
                     ),
                     if (isSelected) ...[
                       const SizedBox(height: 8),
                       Text(
                         'ATTIVO',
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: DropColors.recordRed,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0.8,
-                            ),
+                          color: DropColors.recordRed,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.8,
+                        ),
                       ),
                     ],
                   ],
@@ -248,17 +251,17 @@ class _FullscreenMockCard extends StatelessWidget {
           Text(
             'D — Modalità ascolto (mock)',
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
           ),
           const SizedBox(height: 4),
           Text(
             'Anteprima di come apparirebbe un takeover full-screen. Non ancora implementato nell\'app.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: DropColors.muted(context),
-                  fontSize: 12,
-                ),
+              color: DropColors.muted(context),
+              fontSize: 12,
+            ),
           ),
           const SizedBox(height: 16),
           AspectRatio(

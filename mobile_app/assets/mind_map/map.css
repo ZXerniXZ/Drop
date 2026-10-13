@@ -59,6 +59,7 @@ html, body {
 #map .markmap-foreign div {
   color: var(--ink) !important;
   font: 14px/1.35 sans-serif;
+  opacity: 1 !important;
 }
 
 .markmap-foreign div {
