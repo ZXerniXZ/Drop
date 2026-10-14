@@ -1,10 +1,12 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:flutter/services.dart';
 
 import '../../models/note_structured_data.dart';
+import '../../theme/drop_theme.dart';
+import '../drop_markdown.dart';
+import '../plot_canvas.dart';
 import 'mind_map_handle.dart';
 import 'mind_map_view_stub.dart' as placeholder;
 
@@ -27,9 +29,7 @@ class MindMapView extends StatefulWidget {
 }
 
 class _MindMapViewState extends State<MindMapView> {
-  WebViewController? _controller;
-  var _ready = false;
-  Brightness? _brightness;
+  final _transform = TransformationController();
 
   bool get _underTest => Platform.environment.containsKey('FLUTTER_TEST');
 
@@ -37,50 +37,6 @@ class _MindMapViewState extends State<MindMapView> {
   void initState() {
     super.initState();
     widget.handle.attach(_fit);
-    if (_underTest) return;
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      // Uno sfondo trasparente su Android lascia il WebView vuoto: la pagina
-      // della mappa si apre ma l'albero non viene disegnato.
-      ..setBackgroundColor(const Color(0xFF000000))
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onPageFinished: (_) {
-            _ready = true;
-            _render();
-          },
-        ),
-      )
-      ..addJavaScriptChannel(
-        'DropBridge',
-        onMessageReceived: (message) {
-          Object? decoded;
-          try {
-            decoded = jsonDecode(message.message);
-          } catch (_) {
-            return;
-          }
-          if (decoded is Map && decoded['type'] == 'ready') {
-            _ready = true;
-            _render();
-          }
-        },
-      )
-      ..loadFlutterAsset('assets/mind_map/index.html');
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final brightness = Theme.of(context).brightness;
-    final changed = _brightness != null && _brightness != brightness;
-    _brightness = brightness;
-    _controller?.setBackgroundColor(
-      brightness == Brightness.dark
-          ? const Color(0xFF000000)
-          : const Color(0xFFFAFAFA),
-    );
-    if (changed) _render();
   }
 
   @override
@@ -90,40 +46,54 @@ class _MindMapViewState extends State<MindMapView> {
       oldWidget.handle.detach(_fit);
       widget.handle.attach(_fit);
     }
-    if (oldWidget.title != widget.title || oldWidget.nodes != widget.nodes) {
-      _render();
-    } else if (oldWidget.handle != widget.handle) {
-      _render();
-    }
   }
 
   @override
   void dispose() {
     widget.handle.detach(_fit);
+    _transform.dispose();
     super.dispose();
   }
 
   Future<void> _fit() async {
-    if (!_ready || _controller == null) return;
-    await _controller!.runJavaScript('DropMap.fit()');
+    _transform.value = Matrix4.identity();
   }
 
-  Future<void> _render() async {
-    final controller = _controller;
-    if (!_ready || controller == null || !mounted) return;
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    final payload = jsonEncode({
-      'title': widget.title,
-      'nodes': widget.nodes.map((node) => node.toMap()).toList(),
-    });
-    final script = 'DropMap.render($payload, $dark)';
-    await controller.runJavaScript(script);
-    await controller.runJavaScript('DropMap.fit()');
+  void _open(MindMapNode node) {
+    if (node.body.trim().isEmpty && node.visuals.isEmpty) return;
+    HapticFeedback.selectionClick();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
+            children: [
+              Text(node.title, style: Theme.of(context).textTheme.titleMedium),
+              if (node.body.trim().isNotEmpty) ...[
+                const SizedBox(height: 12),
+                DropMarkdown(data: node.body),
+              ],
+              for (final visual in node.visuals) ...[
+                const SizedBox(height: 16),
+                SizedBox(height: 220, child: PlotCanvas(visual: visual)),
+              ],
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_underTest || _controller == null || !widget.interactive) {
+    if (_underTest || !widget.interactive) {
       return placeholder.MindMapView(
         handle: widget.handle,
         title: widget.title,
@@ -131,6 +101,145 @@ class _MindMapViewState extends State<MindMapView> {
         interactive: widget.interactive,
       );
     }
-    return WebViewWidget(controller: _controller!);
+    final ink = Theme.of(context).colorScheme.onSurface;
+    final line = DropColors.muted(context).withValues(alpha: 0.45);
+    return ColoredBox(
+      color: Theme.of(context).scaffoldBackgroundColor,
+      child: InteractiveViewer(
+        transformationController: _transform,
+        constrained: false,
+        alignment: Alignment.topLeft,
+        minScale: 0.35,
+        maxScale: 2.4,
+        boundaryMargin: const EdgeInsets.all(280),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(28, 24, 48, 48),
+          child: _Branch(
+            title: widget.title.trim().isEmpty ? 'Mappa' : widget.title.trim(),
+            body: '',
+            visuals: const [],
+            children: widget.nodes,
+            ink: ink,
+            line: line,
+            onOpen: _open,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Branch extends StatelessWidget {
+  const _Branch({
+    required this.title,
+    required this.body,
+    required this.visuals,
+    required this.children,
+    required this.ink,
+    required this.line,
+    required this.onOpen,
+  });
+
+  final String title;
+  final String body;
+  final List<Map<String, dynamic>> visuals;
+  final List<MindMapNode> children;
+  final Color ink;
+  final Color line;
+  final void Function(MindMapNode node) onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final node = MindMapNode(
+      title: title,
+      body: body,
+      visuals: visuals,
+      children: children,
+    );
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        _NodeCard(node: node, ink: ink, onOpen: onOpen),
+        if (children.isNotEmpty) ...[
+          Container(width: 22, height: 1, color: line),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var i = 0; i < children.length; i++) ...[
+                if (i > 0) const SizedBox(height: 14),
+                _Branch(
+                  title: children[i].title,
+                  body: children[i].body,
+                  visuals: children[i].visuals,
+                  children: children[i].children,
+                  ink: ink,
+                  line: line,
+                  onOpen: onOpen,
+                ),
+              ],
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _NodeCard extends StatelessWidget {
+  const _NodeCard({
+    required this.node,
+    required this.ink,
+    required this.onOpen,
+  });
+
+  final MindMapNode node;
+  final Color ink;
+  final void Function(MindMapNode node) onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final opens = node.body.trim().isNotEmpty || node.visuals.isNotEmpty;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Material(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(10),
+          child: InkWell(
+            onTap: opens ? () => onOpen(node) : null,
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 220),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: DropColors.border(context)),
+              ),
+              child: Text(
+                node.title,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 14, height: 1.3, color: ink),
+              ),
+            ),
+          ),
+        ),
+        if (node.visuals.isNotEmpty)
+          Container(
+            width: 220,
+            height: 132,
+            margin: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.fromLTRB(4, 8, 4, 4),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: DropColors.border(context)),
+            ),
+            child: PlotCanvas(visual: node.visuals.first),
+          ),
+      ],
+    );
   }
 }
