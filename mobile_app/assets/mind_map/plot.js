@@ -1,10 +1,11 @@
 (function () {
-  if (window.math && window.math.import) {
+  if (window.math && window.math.import && !window.math.__dropLocked) {
     window.math.import({
       import: function () { throw new Error('disabled'); },
       createUnit: function () { throw new Error('disabled'); },
       reviver: function () { throw new Error('disabled'); },
     }, { override: true });
+    window.math.__dropLocked = true;
   }
 
   const FUNCTION_ALIASES = {
